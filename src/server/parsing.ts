@@ -13,14 +13,17 @@ export type ParseResult = {
   debug: Record<string, unknown>;
 };
 type DateOrderPreference = "day-first" | "month-first";
+type ColumnHint = "debit" | "credit" | "unknown";
 
 const DATE_AT_START =
-  /^(\d{4}[/.-]\d{1,2}[/.-]\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}(?:\s+\d{2,4})?|[A-Za-z]{3,9}\s+\d{1,2}(?:,?\s+\d{2,4})?)/;
+  /^(\d{4}[/.-]\d{1,2}[/.-]\d{1,2}(?!\d)|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}(?!\d)|\d{1,2}\s+[A-Za-z]{3,9}(?:\s+(?:\d{4}(?!\d)|\d{2}))?|[A-Za-z]{3,9}\s+\d{1,2}(?:,?\s+\d{2,4}(?!\d))?)/;
 const HEADER_LINE = /\b(date|description|amount|balance|debit|credit)\b/i;
 const METADATA_LINE =
-  /^(date:\s|transaction:\s|showing:\s|order:\s|historyhttps?:|account\s+history|uncleared\s+funds\b|\d+\s+of\s+\d+\b)/i;
-const AMOUNT_TOKEN = /(?:\(\$?\d[\d,]*\.\d{2}\)|-?\$?\d[\d,]*\.\d{2})(?:\s?(?:CR|DR))?/gi;
-const HAS_AMOUNT_TOKEN = /(?:\(\$?\d[\d,]*\.\d{2}\)|-?\$?\d[\d,]*\.\d{2})(?:\s?(?:CR|DR))?/i;
+  /^(date:\s|transaction:\s|showing:\s|order:\s|historyhttps?:|account\s+history|uncleared\s+funds\b|\d+\s+of\s+\d+\b|page\s+\d+\s+of\s+\d+\b|important\b|this\s+transaction\s+listing\b|it\s+is\s+a\s+list\s+of\s+transactions\b|depending\s+on\s+selected\b|issued\.|with\s+the\s+exception\b|a\s+debit\s+does\s+not\s+always\b|national\s+australia\s+bank\b)/i;
+const AMOUNT_TOKEN = /(?:\(\$?\d[\d,]*\.\d{2}(?![\d%])\)|-?\$?\d[\d,]*\.\d{2}(?![\d%]))(?:\s?(?:CR|DR))?/gi;
+const HAS_AMOUNT_TOKEN = /(?:\(\$?\d[\d,]*\.\d{2}(?![\d%])\)|-?\$?\d[\d,]*\.\d{2}(?![\d%]))(?:\s?(?:CR|DR))?/i;
+const DEBIT_CREDIT_BALANCE_HEADER = /debits?\s*credits?\s*balance/i;
+const OPENING_BALANCE_LINE = /\bopening\s+balance\b/i;
 const MONTHS: Record<string, number> = {
   jan: 1,
   january: 1,
@@ -156,7 +159,17 @@ function isLikelyContinuation(line: string): boolean {
   return !HAS_AMOUNT_TOKEN.test(line);
 }
 
-function parseTransactionLine(line: string, datePreference?: DateOrderPreference): Transaction | null {
+type ParsedTransaction = Transaction & { signExplicit: boolean; columnHint: ColumnHint };
+
+function hasExplicitSign(rawAmount: string): boolean {
+  return /\bCR\b|\bDR\b|^\s*-\s*\$?|\(|\)/i.test(rawAmount);
+}
+
+function parseTransactionLine(
+  line: string,
+  datePreference?: DateOrderPreference,
+  hasDebitCreditBalanceHeader = false
+): ParsedTransaction | null {
   const clean = normalizeLine(line);
   if (METADATA_LINE.test(clean)) return null;
   const dateMatch = clean.match(DATE_AT_START);
@@ -172,8 +185,10 @@ function parseTransactionLine(line: string, datePreference?: DateOrderPreference
 
   const amountIndex = amountMatches.length >= 2 ? amountMatches.length - 2 : amountMatches.length - 1;
   const amountRaw = amountMatches[amountIndex][0];
-  const amount = parseAmount(amountRaw);
+  let amount = parseAmount(amountRaw);
   if (amount == null) return null;
+  let signExplicit = hasExplicitSign(amountRaw);
+  let columnHint: ColumnHint = "unknown";
 
   let balance: number | undefined;
   let descriptionPart = remainder.slice(0, amountMatches[amountIndex].index).trim();
@@ -186,10 +201,42 @@ function parseTransactionLine(line: string, datePreference?: DateOrderPreference
     }
   }
 
+  // If we can see Debits/Credits/Balance columns, infer the source column explicitly.
+  if (hasDebitCreditBalanceHeader && amountMatches.length >= 3) {
+    const debitRaw = amountMatches[amountMatches.length - 3][0];
+    const creditRaw = amountMatches[amountMatches.length - 2][0];
+    const balanceRaw = amountMatches[amountMatches.length - 1][0];
+    const debitVal = parseAmount(debitRaw);
+    const creditVal = parseAmount(creditRaw);
+    const balanceVal = parseAmount(balanceRaw);
+
+    if (debitVal != null && creditVal != null && balanceVal != null) {
+      const debitAbs = Math.abs(debitVal);
+      const creditAbs = Math.abs(creditVal);
+
+      if (debitAbs > 0 && creditAbs === 0) {
+        amount = -debitAbs;
+        columnHint = "debit";
+      } else if (creditAbs > 0 && debitAbs === 0) {
+        amount = creditAbs;
+        columnHint = "credit";
+      } else if (debitAbs > 0 || creditAbs > 0) {
+        amount = creditAbs - debitAbs;
+        columnHint = "unknown";
+      }
+
+      signExplicit = hasExplicitSign(debitRaw) || hasExplicitSign(creditRaw);
+      balance = balanceVal;
+      descriptionPart = remainder.slice(0, amountMatches[amountMatches.length - 3].index).trim();
+    }
+  }
+
   const description = descriptionPart.replace(/\s+/g, " ").trim();
   if (!description || HEADER_LINE.test(description)) return null;
 
-  return { date, description, amount, balance };
+  if (/^please note\b/i.test(description) && Math.abs(amount) < 0.0001) return null;
+
+  return { date, description, amount, balance, signExplicit, columnHint };
 }
 
 function detectDatePreference(lines: string[]): DateOrderPreference | undefined {
@@ -221,7 +268,12 @@ export function parseStatementText(text: string): ParseResult {
     .filter(Boolean);
 
   const datePreference = detectDatePreference(lines);
-  const transactions: Transaction[] = [];
+  const hasDebitCreditBalanceHeader = DEBIT_CREDIT_BALANCE_HEADER.test(text);
+  const openingBalanceLine = lines.find((line) => OPENING_BALANCE_LINE.test(line));
+  const openingBalanceMatch = openingBalanceLine ? [...openingBalanceLine.matchAll(AMOUNT_TOKEN)][0]?.[0] : undefined;
+  const openingBalance = openingBalanceMatch ? parseAmount(openingBalanceMatch) : null;
+
+  const transactions: ParsedTransaction[] = [];
   let candidateRows = 0;
   let pendingCandidate: string | null = null;
 
@@ -231,7 +283,7 @@ export function parseStatementText(text: string): ParseResult {
 
     if (pendingCandidate && !isCandidate) {
       const combined = `${pendingCandidate} ${line}`.trim();
-      const combinedParsed = parseTransactionLine(combined, datePreference);
+      const combinedParsed = parseTransactionLine(combined, datePreference, hasDebitCreditBalanceHeader);
       if (combinedParsed) {
         transactions.push(combinedParsed);
         pendingCandidate = null;
@@ -241,7 +293,7 @@ export function parseStatementText(text: string): ParseResult {
       continue;
     }
 
-    const parsed = parseTransactionLine(line, datePreference);
+    const parsed = parseTransactionLine(line, datePreference, hasDebitCreditBalanceHeader);
     if (parsed) {
       transactions.push(parsed);
       pendingCandidate = null;
@@ -259,6 +311,50 @@ export function parseStatementText(text: string): ParseResult {
     }
   }
 
+  let previousBalance = openingBalance;
+  let directionMatchesCurrent = 0;
+  let directionMatchesInverted = 0;
+
+  for (const tx of transactions) {
+    if (tx.balance == null || previousBalance == null || tx.signExplicit) {
+      if (tx.balance != null) previousBalance = tx.balance;
+      continue;
+    }
+
+    const delta = Number((tx.balance - previousBalance).toFixed(2));
+    if (Math.abs(Math.abs(delta) - Math.abs(tx.amount)) <= 0.02 && delta !== 0 && tx.amount !== 0) {
+      if (Math.sign(tx.amount) === Math.sign(delta)) directionMatchesCurrent += 1;
+      if (Math.sign(-tx.amount) === Math.sign(delta)) directionMatchesInverted += 1;
+    }
+
+    if (tx.balance != null) previousBalance = tx.balance;
+  }
+
+  const shouldInvertInferred =
+    directionMatchesInverted >= 2 && directionMatchesInverted > directionMatchesCurrent;
+  if (shouldInvertInferred) {
+    for (const tx of transactions) {
+      if (!tx.signExplicit) tx.amount *= -1;
+    }
+  }
+
+  previousBalance = openingBalance;
+  for (const tx of transactions) {
+    if (!tx.signExplicit && tx.balance != null && previousBalance != null) {
+      const delta = Number((tx.balance - previousBalance).toFixed(2));
+      if (Math.abs(Math.abs(delta) - Math.abs(tx.amount)) <= 0.02 && delta !== 0) {
+        tx.amount = delta < 0 ? -Math.abs(tx.amount) : Math.abs(tx.amount);
+      }
+    }
+
+    if (!tx.signExplicit && hasDebitCreditBalanceHeader && tx.balance == null) {
+      if (tx.columnHint === "debit") tx.amount = shouldInvertInferred ? Math.abs(tx.amount) : -Math.abs(tx.amount);
+      if (tx.columnHint === "credit") tx.amount = shouldInvertInferred ? -Math.abs(tx.amount) : Math.abs(tx.amount);
+    }
+
+    if (tx.balance != null) previousBalance = tx.balance;
+  }
+
   const validRows = transactions.filter((t) => Boolean(t.date) && Number.isFinite(t.amount)).length;
   const ratio = candidateRows > 0 ? validRows / candidateRows : 0;
   const sizeFactor = Math.min(1, validRows / 8);
@@ -270,7 +366,13 @@ export function parseStatementText(text: string): ParseResult {
   if (ratio > 0 && ratio < 0.8) warnings.push("Low parse reliability: fewer than 80% of candidate rows were valid.");
 
   return {
-    transactions,
+    transactions: transactions.map((tx) => ({
+      date: tx.date,
+      description: tx.description,
+      amount: tx.amount,
+      currency: tx.currency,
+      balance: tx.balance,
+    })),
     warnings,
     confidence,
     debug: {
@@ -279,6 +381,10 @@ export function parseStatementText(text: string): ParseResult {
       validRows,
       validRatio: Number(ratio.toFixed(2)),
       datePreference: datePreference ?? "unspecified",
+      hasDebitCreditBalanceHeader,
+      directionMatchesCurrent,
+      directionMatchesInverted,
+      autoInvertedInferredSigns: shouldInvertInferred,
     },
   };
 }

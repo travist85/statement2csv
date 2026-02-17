@@ -1,0 +1,36 @@
+Transaction Listing
+Date Created: Feb 17, 2026 8:39:13 PM
+Account Balance Summary
+Opening Balance$71,979.06 CR
+Total Credits$0.00
+Total Debits$12,028.20
+Closing Balance$59,950.86 CR
+Transaction Details
+DateDetailsDebitsCreditsBalance
+19 Jan 26SuperChoice$792.00$71,187.06 CR
+21 Jan 26INTERNET TRANSFER SALARY$4,742.00$66,445.06 CR
+27 Jan 26Squarespace$25.96$66,419.10 CR
+28 Jan 26V7978 24/01 NAB INTNL TRAN FEE - (SC)
+24011346024
+$0.78$66,418.32 CR
+2 Feb 26741023192 BizCover Polygon Design S$228.09$66,190.23 CR
+2 Feb 26V7978 29/01 MICROSOFT#G137534845
+MSBILL.INF 74798066029
+$20.57$66,169.66 CR
+4 Feb 26XeroAUINV_TufeJiNR XEROAUSTRALIAPTY
+TRAVIS TOPPERWIE
+$100.00$66,069.66 CR
+6 Feb 26INTERNET TRANSFER SALARY$4,944.00$61,125.66 CR
+6 Feb 26SuperChoice$1,174.80$59,950.86 CR
+13 Feb 26PLEASE NOTE FROM TODAY YOUR DR
+INTEREST RATE IS 14.910%
+$0.00$59,950.86 CR
+Page 1 of 1
+Important
+This Transaction Listing is not a statement of account.
+It is a list of transactions (including pending transactions) for the selected date range, as at the time and date the listing was created.
+Depending on selected date range, it may include transactions which appeared on previous statements, and may not include all transactions processed since the last statement was
+issued.
+With the exception of cheque serial numbers, the information shown in the details column may be abbreviated.
+A debit does not always indicate that a payment has been processed.
+National Australia Bank Limited ABN 12 004 044 937 AFSL and Australian Credit License 230686

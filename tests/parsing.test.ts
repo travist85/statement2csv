@@ -74,4 +74,46 @@ describe("parseStatementText", () => {
       balance: 11229.62,
     });
   });
+
+  it("treats debit-column statement rows as outflows and ignores rate percentages", () => {
+    const fixture = readFileSync("tests/fixtures/nab-debits-statement.txt", "utf8");
+    const result = parseStatementText(fixture);
+
+    expect(result.transactions).toHaveLength(9);
+    expect(result.transactions[0]).toEqual({
+      date: "2026-01-19",
+      description: "SuperChoice",
+      amount: -792,
+      balance: 71187.06,
+    });
+    expect(result.transactions[4]).toEqual({
+      date: "2026-02-02",
+      description: "741023192 BizCover Polygon Design S",
+      amount: -228.09,
+      balance: 66190.23,
+    });
+    expect(result.transactions.some((t) => t.amount === 14.91)).toBe(false);
+    expect(result.debug).toMatchObject({
+      hasDebitCreditBalanceHeader: true,
+    });
+  });
+
+  it("uses balance movement to validate inferred debit/credit signs", () => {
+    const statement = [
+      "Opening Balance$100.00 CR",
+      "DateDetailsDebitsCreditsBalance",
+      "01 Jan 26Payment A$10.00$110.00 CR",
+      "02 Jan 26Payment B$5.00$115.00 CR",
+      "03 Jan 26Payment C$20.00$135.00 CR",
+    ].join("\n");
+
+    const result = parseStatementText(statement);
+    const amounts = result.transactions.map((t) => t.amount);
+
+    expect(amounts).toEqual([10, 5, 20]);
+    expect(result.debug).toMatchObject({
+      hasDebitCreditBalanceHeader: true,
+      autoInvertedInferredSigns: false,
+    });
+  });
 });
