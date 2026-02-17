@@ -481,6 +481,32 @@ export default function App() {
           </a>
         </span>
       </div>
+
+      <section style={{ marginTop: 26, borderTop: `1px solid ${theme.panelBorder}`, paddingTop: 18 }}>
+        <h2 style={{ margin: 0, fontFamily: theme.fontHeading, color: theme.heading, fontSize: 24 }}>
+          Bank Statement PDF to CSV Converter
+        </h2>
+        <p style={{ marginTop: 8, color: theme.muted }}>
+          statement2csv helps convert bank statement PDFs into CSV transactions you can review and export quickly.
+        </p>
+        <h3 style={{ marginTop: 18, marginBottom: 8, fontFamily: theme.fontHeading, color: theme.heading, fontSize: 18 }}>
+          Common use cases
+        </h3>
+        <ul style={{ marginTop: 0, color: theme.muted }}>
+          <li>Convert statement PDFs when direct bank CSV export is missing or inconsistent.</li>
+          <li>Prepare transaction rows for spreadsheet cleanup and accounting import.</li>
+          <li>Standardize statement data from multiple institutions into one CSV format.</li>
+        </ul>
+        <h3 style={{ marginTop: 18, marginBottom: 8, fontFamily: theme.fontHeading, color: theme.heading, fontSize: 18 }}>
+          FAQ
+        </h3>
+        <p style={{ marginBottom: 6 }}><strong>Can I convert a bank statement PDF to CSV?</strong></p>
+        <p style={{ marginTop: 0, color: theme.muted }}>Yes. Upload your statement, review transactions, and export CSV.</p>
+        <p style={{ marginBottom: 6 }}><strong>Is my statement data retained?</strong></p>
+        <p style={{ marginTop: 0, color: theme.muted }}>No. Files are deleted after conversion and not used for any other purpose.</p>
+        <p style={{ marginBottom: 6 }}><strong>Do scanned statements work?</strong></p>
+        <p style={{ marginTop: 0, color: theme.muted }}>Text-based PDFs are supported now. OCR support is planned next.</p>
+      </section>
       </div>
     </div>
   );
