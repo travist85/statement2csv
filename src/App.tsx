@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Transaction = {
   date: string; // ISO YYYY-MM-DD (normalized)
@@ -95,6 +95,33 @@ const THEMES: Record<ThemeName, Theme> = {
     tableFont: "'Source Sans 3', 'Segoe UI', system-ui, sans-serif",
   },
 };
+
+type AnalyticsEventName =
+  | "page_view"
+  | "convert_clicked"
+  | "convert_success"
+  | "convert_error"
+  | "download_csv"
+  | "download_xlsx"
+  | "report_issue_clicked";
+
+function trackEvent(name: AnalyticsEventName, meta?: Record<string, unknown>): void {
+  const payload = {
+    event: name,
+    path: window.location.pathname,
+    ts: new Date().toISOString(),
+    meta,
+  };
+
+  void fetch("/api/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).catch(() => {
+    // Non-blocking analytics; ignore delivery failures.
+  });
+}
 
 async function getUploadUrl(file: File): Promise<{ uploadUrl: string; key: string }> {
   const resp = await fetch("/api/upload-url", {
@@ -250,8 +277,13 @@ export default function App() {
   const theme = THEMES[themeName];
   const isTerminal = themeName === "terminal-ledger";
 
+  useEffect(() => {
+    trackEvent("page_view");
+  }, []);
+
   async function onConvert() {
     if (!file) return;
+    trackEvent("convert_clicked", { file_name_ext: file.name.split(".").pop()?.toLowerCase() ?? "unknown" });
     setError(null);
     setResult(null);
     setBusy(true);
@@ -260,8 +292,14 @@ export default function App() {
       await uploadToR2(uploadUrl, file);
       const parsed = await parseFromKey(key);
       setResult(parsed);
+      trackEvent("convert_success", {
+        transactions: parsed.transactions.length,
+        confidence: parsed.confidence ?? null,
+        warnings: parsed.warnings?.length ?? 0,
+      });
     } catch (e: any) {
       setError(e?.message ?? String(e));
+      trackEvent("convert_error");
     } finally {
       setBusy(false);
     }
@@ -269,6 +307,7 @@ export default function App() {
 
   function downloadCsv() {
     if (!csv) return;
+    trackEvent("download_csv", { rows: result?.transactions?.length ?? 0 });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -280,6 +319,7 @@ export default function App() {
 
   async function downloadXlsx() {
     if (!result?.transactions?.length) return;
+    trackEvent("download_xlsx", { rows: result.transactions.length });
     const blob = await toXlsx(result.transactions, exportOptions);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -518,6 +558,7 @@ export default function App() {
             href="https://github.com/travist85/statement2csv/issues"
             target="_blank"
             rel="noreferrer"
+            onClick={() => trackEvent("report_issue_clicked")}
             style={{ color: theme.accent }}
           >
             Report an issue
