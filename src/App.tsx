@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Transaction = {
   date: string; // ISO YYYY-MM-DD (normalized)
@@ -105,9 +105,16 @@ type AnalyticsEventName =
   | "download_xlsx"
   | "report_issue_clicked";
 
-function trackEvent(name: AnalyticsEventName, meta?: Record<string, unknown>): void {
+function trackEvent(
+  name: AnalyticsEventName,
+  clientId: string,
+  sessionId: string,
+  meta?: Record<string, unknown>
+): void {
   const payload = {
     event: name,
+    clientId,
+    sessionId,
     path: window.location.pathname,
     ts: new Date().toISOString(),
     meta,
@@ -121,6 +128,31 @@ function trackEvent(name: AnalyticsEventName, meta?: Record<string, unknown>): v
   }).catch(() => {
     // Non-blocking analytics; ignore delivery failures.
   });
+}
+
+function randomId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+}
+
+function getOrCreateClientId(): string {
+  const key = "banksheet_client_id";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const created = randomId("c");
+  localStorage.setItem(key, created);
+  return created;
+}
+
+function getOrCreateSessionId(): string {
+  const key = "banksheet_session_id";
+  const existing = sessionStorage.getItem(key);
+  if (existing) return existing;
+  const created = randomId("s");
+  sessionStorage.setItem(key, created);
+  return created;
 }
 
 async function getUploadUrl(file: File): Promise<{ uploadUrl: string; key: string }> {
@@ -250,6 +282,7 @@ async function toXlsx(transactions: Transaction[], options: ExportOptions): Prom
 }
 
 export default function App() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -276,14 +309,25 @@ export default function App() {
   const showDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
   const theme = THEMES[themeName];
   const isTerminal = themeName === "terminal-ledger";
+  const analyticsContext = useMemo(
+    () => ({
+      clientId: getOrCreateClientId(),
+      sessionId: getOrCreateSessionId(),
+    }),
+    []
+  );
+
+  function emitEvent(name: AnalyticsEventName, meta?: Record<string, unknown>) {
+    trackEvent(name, analyticsContext.clientId, analyticsContext.sessionId, meta);
+  }
 
   useEffect(() => {
-    trackEvent("page_view");
+    emitEvent("page_view");
   }, []);
 
   async function onConvert() {
     if (!file) return;
-    trackEvent("convert_clicked", { file_name_ext: file.name.split(".").pop()?.toLowerCase() ?? "unknown" });
+    emitEvent("convert_clicked", { file_name_ext: file.name.split(".").pop()?.toLowerCase() ?? "unknown" });
     setError(null);
     setResult(null);
     setBusy(true);
@@ -292,14 +336,14 @@ export default function App() {
       await uploadToR2(uploadUrl, file);
       const parsed = await parseFromKey(key);
       setResult(parsed);
-      trackEvent("convert_success", {
+      emitEvent("convert_success", {
         transactions: parsed.transactions.length,
         confidence: parsed.confidence ?? null,
         warnings: parsed.warnings?.length ?? 0,
       });
     } catch (e: any) {
       setError(e?.message ?? String(e));
-      trackEvent("convert_error");
+      emitEvent("convert_error");
     } finally {
       setBusy(false);
     }
@@ -307,7 +351,7 @@ export default function App() {
 
   function downloadCsv() {
     if (!csv) return;
-    trackEvent("download_csv", { rows: result?.transactions?.length ?? 0 });
+    emitEvent("download_csv", { rows: result?.transactions?.length ?? 0 });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -319,7 +363,7 @@ export default function App() {
 
   async function downloadXlsx() {
     if (!result?.transactions?.length) return;
-    trackEvent("download_xlsx", { rows: result.transactions.length });
+    emitEvent("download_xlsx", { rows: result.transactions.length });
     const blob = await toXlsx(result.transactions, exportOptions);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -381,10 +425,39 @@ export default function App() {
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <input
+              ref={fileInputRef}
               type="file"
               accept="application/pdf"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }}
+              aria-hidden="true"
+              tabIndex={-1}
             />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{ padding: "8px 12px", borderRadius: theme.sectionRadius, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}
+            >
+              Select PDF
+            </button>
+            <div
+              style={{
+                minWidth: 220,
+                maxWidth: 360,
+                padding: "8px 10px",
+                border: `1px solid ${theme.panelBorder}`,
+                borderRadius: theme.sectionRadius,
+                background: theme.controlBg,
+                color: file ? theme.pageFg : theme.muted,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                fontFamily: isTerminal ? theme.tableFont : theme.fontBody,
+                fontSize: 13,
+              }}
+              title={file ? file.name : "No file selected"}
+            >
+              {file ? file.name : "No file selected"}
+            </div>
             <button disabled={!file || busy} onClick={onConvert} style={{ padding: "8px 12px", borderRadius: theme.sectionRadius, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
               {busy ? "Converting…" : "Convert"}
             </button>
@@ -552,13 +625,13 @@ export default function App() {
         )}
       </div>
 
-      <div style={{ marginTop: 18, color: theme.muted, fontSize: 13, display: "flex", justifyContent: "flex-end", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ marginTop: 18, color: theme.muted, fontSize: 13, display: "flex", justifyContent: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <span style={{ display: "flex", gap: 14 }}>
           <a
             href="https://github.com/travist85/statement2csv/issues"
             target="_blank"
             rel="noreferrer"
-            onClick={() => trackEvent("report_issue_clicked")}
+            onClick={() => emitEvent("report_issue_clicked")}
             style={{ color: theme.accent }}
           >
             Report an issue

@@ -28,6 +28,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const event = typeof body.event === "string" ? body.event : "";
   if (!ALLOWED_EVENTS.has(event)) return res.status(400).json({ error: "invalid event" });
 
+  const clientId = typeof body.clientId === "string" ? body.clientId.slice(0, 120) : "unknown";
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId.slice(0, 120) : "unknown";
   const path = typeof body.path === "string" ? body.path.slice(0, 200) : "/";
   const ts = typeof body.ts === "string" ? body.ts : new Date().toISOString();
   const meta = sanitizeMeta(body.meta);
@@ -36,6 +38,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     JSON.stringify({
       type: "analytics_event",
       event,
+      clientId,
+      sessionId,
       path,
       ts,
       meta,
@@ -44,4 +48,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   return res.status(202).json({ ok: true });
 }
-
