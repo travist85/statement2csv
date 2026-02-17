@@ -9,7 +9,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    "types": ["node"]
   },
-  "include": ["vite.config.ts", "api/**/*.ts", "src/server/**/*.ts"]
+  "include": ["vite.config.ts", "api/**/*.ts", "src/server/**/*.ts", "src/types/**/*.d.ts"]
 }

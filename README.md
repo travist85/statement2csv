@@ -7,8 +7,8 @@ Convert bank statement PDFs into structured CSV transactions.
 - **React + Vite** frontend for uploading a PDF and previewing parsed transactions.
 - **Vercel serverless functions** for:
   - issuing **Cloudflare R2 pre-signed upload URLs** (direct-to-R2 upload)
-  - fetching the uploaded PDF from R2 and running parsing (stubbed)
-- `/project-memory` Markdown files that preserve project context for Codex/AI tools.
+  - fetching the uploaded PDF from R2 and parsing transactions (text-PDF MVP)
+- `/docs` Markdown files that preserve project context for Codex/AI tools.
 
 ## Architecture (high level)
 
@@ -29,15 +29,47 @@ npm install
 
 2) Create `.env.local` from `.env.example` and fill in values
 
-3) Run dev server (frontend)
+3) Run frontend-only dev server
 
 ```bash
 npm run dev
 ```
 
 > Note: Vercel `/api/*` routes run in Vercel. For local development, you can:
-> - use `vercel dev` (recommended), or
+> - use `npm run vercel:dev` (recommended), or
 > - deploy and point frontend to production API endpoints
+
+## Quick test flow
+
+Use this when you want to verify browser behavior quickly without local `vercel dev` issues.
+
+1) Build prebuilt artifacts:
+
+```bash
+npm run vercel:build
+```
+
+2) Deploy prebuilt output and open the URL:
+
+```bash
+npm run vercel:deploy:prebuilt
+```
+
+3) In the browser:
+- upload a PDF
+- click `Convert`
+- verify preview rows
+- click `Download CSV`
+
+## Local full-stack flow
+
+If local dev works on your machine, use:
+
+```bash
+npm run vercel:dev
+```
+
+If Vercel CLI fails locally on Windows, use the quick test flow above as the fallback path.
 
 ## Deploy
 
@@ -48,4 +80,4 @@ npm run dev
 
 ## Project context
 
-See `/project-memory` for constraints, decisions, and parsing strategy.
+See `/docs` for constraints, decisions, and parsing strategy.
