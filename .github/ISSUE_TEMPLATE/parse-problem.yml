@@ -1,0 +1,58 @@
+name: Parse problem
+description: Report a statement conversion issue so we can reproduce and fix it.
+title: "[parse] "
+labels: ["bug", "parser"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please avoid posting full unredacted financial data.
+  - type: dropdown
+    id: region
+    attributes:
+      label: Country/region
+      options:
+        - Australia
+        - United States
+        - United Kingdom
+        - Europe
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: bank
+    attributes:
+      label: Bank name
+      placeholder: e.g. ANZ, Chase, NAB
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What went wrong
+      description: Describe the mismatch between expected and actual output.
+      placeholder: Missing rows, wrong signs, merged descriptions, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      description: What should the CSV/preview have looked like?
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Redacted sample lines (optional)
+      description: Paste 2-10 redacted lines from statement text and expected rows.
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      options:
+        - Always
+        - Sometimes
+        - One-off
+    validations:
+      required: true

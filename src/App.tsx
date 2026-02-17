@@ -34,7 +34,7 @@ type ExportRow = {
   balance?: number;
 };
 
-type ThemeName = "classic" | "ledger" | "signal";
+type ThemeName = "terminal-ledger" | "financial-desk";
 type Theme = {
   pageBg: string;
   pageFg: string;
@@ -51,59 +51,48 @@ type Theme = {
   controlBorder: string;
   fontBody: string;
   fontHeading: string;
+  sectionRadius: number;
+  tableFont: string;
 };
 
 const THEMES: Record<ThemeName, Theme> = {
-  classic: {
-    pageBg: "#f7f7f7",
-    pageFg: "#0f172a",
-    panelBg: "#ffffff",
-    panelBorder: "#e2e8f0",
-    muted: "#475569",
-    accent: "#1d4ed8",
-    heading: "#0f172a",
-    tableHeaderBg: "#f8fafc",
-    tableRowBorder: "#e2e8f0",
-    tableRowAlt: "#fbfdff",
-    controlBg: "#ffffff",
-    controlActiveBg: "#e8f0ff",
-    controlBorder: "#cbd5e1",
+  "terminal-ledger": {
+    pageBg: "#070b11",
+    pageFg: "#c8f8d7",
+    panelBg: "#0a1118",
+    panelBorder: "#1f3a2d",
+    muted: "#7dc59a",
+    accent: "#34f5a4",
+    heading: "#d4ffe6",
+    tableHeaderBg: "#0b161e",
+    tableRowBorder: "#1e3a31",
+    tableRowAlt: "#09131a",
+    controlBg: "#0c1821",
+    controlActiveBg: "#123329",
+    controlBorder: "#2a5b48",
     fontBody: "'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif",
-    fontHeading: "'Space Grotesk', 'Segoe UI', system-ui, sans-serif",
+    fontHeading: "'IBM Plex Mono', Consolas, monospace",
+    sectionRadius: 0,
+    tableFont: "'IBM Plex Mono', Consolas, monospace",
   },
-  ledger: {
-    pageBg: "#f3f4ee",
-    pageFg: "#1b1f1c",
-    panelBg: "#fcfcf8",
-    panelBorder: "#d2d8c8",
-    muted: "#50574c",
-    accent: "#335c3b",
-    heading: "#1e3423",
-    tableHeaderBg: "#f2f5ec",
-    tableRowBorder: "#d8ded0",
-    tableRowAlt: "#f9faf4",
-    controlBg: "#fbfcf6",
-    controlActiveBg: "#e7efe0",
-    controlBorder: "#bfcbb5",
+  "financial-desk": {
+    pageBg: "#f4f0e7",
+    pageFg: "#1f1b16",
+    panelBg: "#fcfaf5",
+    panelBorder: "#cfc3b1",
+    muted: "#675f53",
+    accent: "#7f4f24",
+    heading: "#2d2114",
+    tableHeaderBg: "#efe5d6",
+    tableRowBorder: "#d6cab8",
+    tableRowAlt: "#faf6ef",
+    controlBg: "#f8f3ea",
+    controlActiveBg: "#efe3d1",
+    controlBorder: "#c6b8a4",
     fontBody: "'Source Sans 3', 'Segoe UI', system-ui, sans-serif",
     fontHeading: "'Fraunces', Georgia, serif",
-  },
-  signal: {
-    pageBg: "#0b1220",
-    pageFg: "#dbe6ff",
-    panelBg: "#111b2e",
-    panelBorder: "#27344d",
-    muted: "#9cb1d9",
-    accent: "#22d3ee",
-    heading: "#f8fbff",
-    tableHeaderBg: "#122036",
-    tableRowBorder: "#24354f",
-    tableRowAlt: "#0f1a2d",
-    controlBg: "#13203a",
-    controlActiveBg: "#1b305a",
-    controlBorder: "#2d4164",
-    fontBody: "'Space Grotesk', 'Segoe UI', system-ui, sans-serif",
-    fontHeading: "'Sora', 'Segoe UI', system-ui, sans-serif",
+    sectionRadius: 2,
+    tableFont: "'Source Sans 3', 'Segoe UI', system-ui, sans-serif",
   },
 };
 
@@ -208,7 +197,7 @@ export default function App() {
   const [includeCurrency, setIncludeCurrency] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("signed");
   const [signConvention, setSignConvention] = useState<SignConvention>("native");
-  const [themeName, setThemeName] = useState<ThemeName>("classic");
+  const [themeName, setThemeName] = useState<ThemeName>("financial-desk");
 
   const exportOptions = useMemo(
     () => ({ includeCurrency, format: exportFormat, signConvention }),
@@ -225,6 +214,7 @@ export default function App() {
     [result, exportOptions]
   );
   const theme = THEMES[themeName];
+  const isTerminal = themeName === "terminal-ledger";
 
   async function onConvert() {
     if (!file) return;
@@ -255,37 +245,54 @@ export default function App() {
   }
 
   return (
-    <div style={{ background: `linear-gradient(180deg, ${theme.pageBg} 0%, ${theme.pageBg} 70%, ${theme.panelBg} 100%)`, minHeight: "100vh", color: theme.pageFg }}>
-      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "24px 16px", fontFamily: theme.fontBody }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ marginBottom: 6, marginTop: 0, fontFamily: theme.fontHeading, color: theme.heading, letterSpacing: 0.2 }}>statement2csv</h1>
-          <p style={{ marginTop: 0, color: theme.muted }}>
-        Upload a bank statement PDF → preview transactions → download CSV.
+    <div style={{ background: `linear-gradient(180deg, ${theme.pageBg} 0%, ${theme.pageBg} 65%, ${theme.panelBg} 100%)`, minHeight: "100vh", color: theme.pageFg }}>
+      <div style={{ maxWidth: isTerminal ? 1240 : 1100, margin: "0 auto", padding: "22px 16px", fontFamily: theme.fontBody }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: isTerminal ? "stretch" : "center", gap: 12, flexWrap: "wrap", border: isTerminal ? `1px solid ${theme.panelBorder}` : "none", padding: isTerminal ? 12 : 0, background: isTerminal ? theme.panelBg : "transparent" }}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <h1 style={{ marginBottom: 0, marginTop: 0, fontFamily: theme.fontHeading, color: theme.heading, letterSpacing: isTerminal ? 1.2 : 0.2, textTransform: isTerminal ? "uppercase" : "none", fontSize: isTerminal ? 30 : 46 }}>statement2csv</h1>
+            <span
+              style={{
+                fontSize: 11,
+                letterSpacing: 0.8,
+                textTransform: "uppercase",
+                border: `1px solid ${theme.controlBorder}`,
+                background: theme.controlBg,
+                color: theme.muted,
+                padding: "2px 6px",
+                borderRadius: theme.sectionRadius,
+              }}
+            >
+              Public Beta
+            </span>
+          </div>
+          <p style={{ marginTop: 0, marginBottom: 0, color: theme.muted, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
+        Upload your statement, review transactions, export CSV.
       </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: theme.muted, fontSize: 13 }}>Theme</span>
-          {(["classic", "ledger", "signal"] as ThemeName[]).map((name) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, borderLeft: isTerminal ? `1px solid ${theme.panelBorder}` : "none", paddingLeft: isTerminal ? 12 : 0 }}>
+          <span style={{ color: theme.muted, fontSize: 13, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Style</span>
+          {(["financial-desk", "terminal-ledger"] as ThemeName[]).map((name) => (
             <button
               key={name}
               onClick={() => setThemeName(name)}
               style={{
                 padding: "6px 10px",
-                borderRadius: 8,
+                borderRadius: theme.sectionRadius,
                 border: `1px solid ${theme.controlBorder}`,
                 background: themeName === name ? theme.controlActiveBg : theme.controlBg,
                 color: theme.pageFg,
                 textTransform: "capitalize",
+                fontFamily: isTerminal ? theme.tableFont : theme.fontBody,
               }}
             >
-              {name}
+              {name === "terminal-ledger" ? "Terminal" : "Classic"}
             </button>
           ))}
         </div>
       </div>
 
-      <div style={{ border: `1px solid ${theme.panelBorder}`, borderRadius: 14, padding: 16, background: theme.panelBg, boxShadow: "0 8px 30px rgba(0,0,0,0.08)" }}>
+      <div style={{ marginTop: 14, border: `1px solid ${theme.panelBorder}`, borderRadius: theme.sectionRadius, padding: 16, background: theme.panelBg, boxShadow: isTerminal ? "none" : "0 8px 30px rgba(30,20,10,0.08)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <input
@@ -293,16 +300,16 @@ export default function App() {
               accept="application/pdf"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-            <button disabled={!file || busy} onClick={onConvert} style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg }}>
+            <button disabled={!file || busy} onClick={onConvert} style={{ padding: "8px 12px", borderRadius: theme.sectionRadius, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
               {busy ? "Converting…" : "Convert"}
             </button>
-            <button disabled={!csv} onClick={downloadCsv} style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg }}>
+            <button disabled={!csv} onClick={downloadCsv} style={{ padding: "8px 12px", borderRadius: theme.sectionRadius, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
               Download CSV
             </button>
           </div>
 
-          <div style={{ minWidth: 260, border: `1px solid ${theme.panelBorder}`, borderRadius: 10, padding: 10, background: theme.controlBg }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Export Settings</div>
+          <div style={{ minWidth: 260, border: `1px solid ${theme.panelBorder}`, borderRadius: theme.sectionRadius, padding: 10, background: theme.controlBg }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Export Settings</div>
             <label style={{ display: "block", fontSize: 13, marginBottom: 8 }}>
               <input
                 type="checkbox"
@@ -323,9 +330,10 @@ export default function App() {
                   border: `1px solid ${theme.controlBorder}`,
                   background: exportFormat === "signed" ? theme.controlActiveBg : theme.controlBg,
                   color: theme.pageFg,
+                  borderRadius: theme.sectionRadius,
                 }}
               >
-                Signed Amount
+                Single Amount
               </button>
               <button
                 onClick={() => setExportFormat("split")}
@@ -334,13 +342,14 @@ export default function App() {
                   border: `1px solid ${theme.controlBorder}`,
                   background: exportFormat === "split" ? theme.controlActiveBg : theme.controlBg,
                   color: theme.pageFg,
+                  borderRadius: theme.sectionRadius,
                 }}
               >
                 Debit/Credit
               </button>
             </div>
             <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
-              Sign convention:
+              Amount signs:
             </label>
             <div style={{ display: "flex", gap: 8 }}>
               <button
@@ -350,9 +359,10 @@ export default function App() {
                   border: `1px solid ${theme.controlBorder}`,
                   background: signConvention === "native" ? theme.controlActiveBg : theme.controlBg,
                   color: theme.pageFg,
+                  borderRadius: theme.sectionRadius,
                 }}
               >
-                Native
+                As Statement
               </button>
               <button
                 onClick={() => setSignConvention("inverted")}
@@ -361,16 +371,17 @@ export default function App() {
                   border: `1px solid ${theme.controlBorder}`,
                   background: signConvention === "inverted" ? theme.controlActiveBg : theme.controlBg,
                   color: theme.pageFg,
+                  borderRadius: theme.sectionRadius,
                 }}
               >
-                Inverted
+                Flip +/-
               </button>
             </div>
           </div>
         </div>
 
         <div style={{ marginTop: 10, color: theme.muted, fontSize: 13 }}>
-          Privacy: files are uploaded to R2 for parsing and deleted after conversion (MVP target behavior).
+          Privacy: Files are deleted after conversion and never used for any other purpose.
         </div>
 
         {error && (
@@ -381,9 +392,10 @@ export default function App() {
 
         {result && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "baseline" }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "baseline", borderBottom: `1px solid ${theme.tableRowBorder}`, paddingBottom: 6, marginBottom: 6 }}>
               <div><strong>Transactions:</strong> {result.transactions.length}</div>
               {typeof result.confidence === "number" && <div><strong>Confidence:</strong> {(result.confidence * 100).toFixed(0)}%</div>}
+              <div><strong>Flags:</strong> {result.warnings?.length ?? 0}</div>
             </div>
 
             {result.warnings?.length ? (
@@ -393,7 +405,7 @@ export default function App() {
             ) : null}
 
             <div style={{ marginTop: 12, overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: theme.tableFont }}>
                 <thead>
                   <tr style={{ background: theme.tableHeaderBg }}>
                     <th style={{ textAlign: "left", borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px" }}>Date</th>
@@ -456,8 +468,18 @@ export default function App() {
         )}
       </div>
 
-      <div style={{ marginTop: 18, color: "#666", fontSize: 13 }}>
-        Text-PDF parsing is enabled for MVP. OCR fallback for scanned PDFs is planned next (see /docs).
+      <div style={{ marginTop: 18, color: theme.muted, fontSize: 13, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <span>Text-based PDFs are supported. OCR for scanned statements is coming next.</span>
+        <span style={{ display: "flex", gap: 14 }}>
+          <a
+            href="https://github.com/travist85/statement2csv/issues"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: theme.accent }}
+          >
+            Report an issue
+          </a>
+        </span>
       </div>
       </div>
     </div>

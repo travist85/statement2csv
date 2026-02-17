@@ -1,0 +1,23 @@
+name: General feedback
+description: Share product feedback, UX pain points, and feature requests.
+title: "[feedback] "
+labels: ["feedback"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feedback summary
+      placeholder: What worked, what did not, what should change?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Your workflow
+      description: How are you using statement2csv today?
+      placeholder: One-off cleanup, monthly bookkeeping, accountant handoff, etc.
+  - type: textarea
+    id: priority
+    attributes:
+      label: Highest-priority improvement
+      placeholder: If we fixed one thing next, what should it be?

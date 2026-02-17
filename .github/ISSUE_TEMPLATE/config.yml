@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/travist85/statement2csv/security/advisories/new
+    about: Report sensitive vulnerabilities privately.
