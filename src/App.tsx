@@ -189,6 +189,39 @@ function toCsv(transactions: Transaction[], options: ExportOptions): string {
   return [headers.join(","), ...body].join("\n");
 }
 
+async function toXlsx(transactions: Transaction[], options: ExportOptions): Promise<Blob> {
+  const XLSX = await import("xlsx");
+  const rows = toExportRows(transactions, options);
+  const data = rows.map((row) => {
+    const base: Record<string, string | number> = {
+      Date: row.date,
+      Description: row.description,
+    };
+
+    if (options.format === "split") {
+      base.Debit = row.debit ?? "";
+      base.Credit = row.credit ?? "";
+    } else {
+      base.Amount = row.amount ?? "";
+    }
+
+    if (options.includeCurrency) {
+      base.Currency = row.currency ?? "";
+    }
+
+    base.Balance = row.balance ?? "";
+    return base;
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Transactions");
+  const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  return new Blob([bytes], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -213,6 +246,7 @@ export default function App() {
     () => (result?.transactions?.length ? toCsv(result.transactions, exportOptions) : ""),
     [result, exportOptions]
   );
+  const showDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
   const theme = THEMES[themeName];
   const isTerminal = themeName === "terminal-ledger";
 
@@ -244,13 +278,24 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function downloadXlsx() {
+    if (!result?.transactions?.length) return;
+    const blob = await toXlsx(result.transactions, exportOptions);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "transactions.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div style={{ background: `linear-gradient(180deg, ${theme.pageBg} 0%, ${theme.pageBg} 65%, ${theme.panelBg} 100%)`, minHeight: "100vh", color: theme.pageFg }}>
       <div style={{ maxWidth: isTerminal ? 1240 : 1100, margin: "0 auto", padding: "22px 16px", fontFamily: theme.fontBody }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: isTerminal ? "stretch" : "center", gap: 12, flexWrap: "wrap", border: isTerminal ? `1px solid ${theme.panelBorder}` : "none", padding: isTerminal ? 12 : 0, background: isTerminal ? theme.panelBg : "transparent" }}>
         <div style={{ display: "grid", gap: 4 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <h1 style={{ marginBottom: 0, marginTop: 0, fontFamily: theme.fontHeading, color: theme.heading, letterSpacing: isTerminal ? 1.2 : 0.2, textTransform: isTerminal ? "uppercase" : "none", fontSize: isTerminal ? 30 : 46 }}>statement2csv</h1>
+            <h1 style={{ marginBottom: 0, marginTop: 0, fontFamily: theme.fontHeading, color: theme.heading, letterSpacing: isTerminal ? 1.2 : 0.2, textTransform: isTerminal ? "uppercase" : "none", fontSize: isTerminal ? 30 : 46 }}>BankSheet</h1>
             <span
               style={{
                 fontSize: 11,
@@ -267,7 +312,7 @@ export default function App() {
             </span>
           </div>
           <p style={{ marginTop: 0, marginBottom: 0, color: theme.muted, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
-        Upload your statement, review transactions, export CSV.
+        Upload your statement, review transactions, export CSV or XLSX.
       </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, borderLeft: isTerminal ? `1px solid ${theme.panelBorder}` : "none", paddingLeft: isTerminal ? 12 : 0 }}>
@@ -305,6 +350,9 @@ export default function App() {
             </button>
             <button disabled={!csv} onClick={downloadCsv} style={{ padding: "8px 12px", borderRadius: theme.sectionRadius, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
               Download CSV
+            </button>
+            <button disabled={!result?.transactions?.length} onClick={downloadXlsx} style={{ padding: "8px 12px", borderRadius: theme.sectionRadius, border: `1px solid ${theme.controlBorder}`, background: theme.controlBg, color: theme.pageFg, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
+              Download XLSX
             </button>
           </div>
 
@@ -378,10 +426,6 @@ export default function App() {
               </button>
             </div>
           </div>
-        </div>
-
-        <div style={{ marginTop: 10, color: theme.muted, fontSize: 13 }}>
-          Privacy: Files are deleted after conversion and never used for any other purpose.
         </div>
 
         {error && (
@@ -458,7 +502,7 @@ export default function App() {
               )}
             </div>
 
-            {result.debug && (
+            {showDebug && result.debug && (
               <details style={{ marginTop: 12 }}>
                 <summary>Debug</summary>
                 <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(result.debug, null, 2)}</pre>
@@ -468,8 +512,7 @@ export default function App() {
         )}
       </div>
 
-      <div style={{ marginTop: 18, color: theme.muted, fontSize: 13, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <span>Text-based PDFs are supported. OCR for scanned statements is coming next.</span>
+      <div style={{ marginTop: 18, color: theme.muted, fontSize: 13, display: "flex", justifyContent: "flex-end", gap: 12, flexWrap: "wrap" }}>
         <span style={{ display: "flex", gap: 14 }}>
           <a
             href="https://github.com/travist85/statement2csv/issues"
@@ -481,12 +524,6 @@ export default function App() {
           </a>
         </span>
       </div>
-
-      <section style={{ marginTop: 26, borderTop: `1px solid ${theme.panelBorder}`, paddingTop: 18 }}>
-        <p style={{ margin: 0, color: theme.muted }}>
-          Built for bookkeeping, reconciliation, and historical data cleanup across mixed statement formats.
-        </p>
-      </section>
       </div>
     </div>
   );

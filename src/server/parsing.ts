@@ -16,7 +16,7 @@ type DateOrderPreference = "day-first" | "month-first";
 type ColumnHint = "debit" | "credit" | "unknown";
 
 const DATE_AT_START =
-  /^(\d{4}[/.-]\d{1,2}[/.-]\d{1,2}(?!\d)|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}(?!\d)|\d{1,2}\s+[A-Za-z]{3,9}(?:\s+(?:\d{4}(?!\d)|\d{2}))?|[A-Za-z]{3,9}\s+\d{1,2}(?:,?\s+\d{2,4}(?!\d))?)/;
+  /^(\d{4}[/.-]\d{1,2}[/.-]\d{1,2}(?!\d)|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}(?!\d)|\d{1,2}\s+[A-Za-z]{3,9}(?:\s+(?:\d{4}(?!\d)|\d{4}(?=\d\D)|\d{2}))?|[A-Za-z]{3,9}\s+\d{1,2}(?:,?\s+(?:\d{4}(?!\d)|\d{4}(?=\d\D)|\d{2}))?)/;
 const HEADER_LINE = /\b(date|description|amount|balance|debit|credit)\b/i;
 const METADATA_LINE =
   /^(date:\s|transaction:\s|showing:\s|order:\s|historyhttps?:|account\s+history|uncleared\s+funds\b|\d+\s+of\s+\d+\b|page\s+\d+\s+of\s+\d+\b|important\b|this\s+transaction\s+listing\b|it\s+is\s+a\s+list\s+of\s+transactions\b|depending\s+on\s+selected\b|issued\.|with\s+the\s+exception\b|a\s+debit\s+does\s+not\s+always\b|national\s+australia\s+bank\b)/i;

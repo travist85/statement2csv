@@ -116,4 +116,21 @@ describe("parseStatementText", () => {
       autoInvertedInferredSigns: false,
     });
   });
+
+  it("parses glued year+merchant digit without corrupting date or description", () => {
+    const statement = [
+      "Transaction history",
+      "Date Description Money in Money out Balance",
+      "6 Feb 20267-ELEVEN 3058 -$6.80 $5.09",
+    ].join("\n");
+
+    const result = parseStatementText(statement);
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0]).toEqual({
+      date: "2026-02-06",
+      description: "7-ELEVEN 3058",
+      amount: -6.8,
+      balance: 5.09,
+    });
+  });
 });

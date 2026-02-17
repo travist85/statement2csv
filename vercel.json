@@ -1,3 +1,16 @@
 {
-  "devCommand": "node scripts/vite-dev.mjs"
+  "devCommand": "node scripts/vite-dev.mjs",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.banksheet.co"
+        }
+      ],
+      "destination": "https://banksheet.co/:path*",
+      "permanent": true
+    }
+  ]
 }
