@@ -753,7 +753,7 @@ export default function App() {
           fontSize: 12,
         }}
       >
-        <span>BankSheet v0.1.0 (Public Beta)</span>
+        <span>{`BankSheet v${__APP_VERSION__} (Public Beta)`}</span>
         <span>Statement files and transaction data are deleted after conversion.</span>
       </footer>
 
