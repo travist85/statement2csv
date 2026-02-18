@@ -44,7 +44,9 @@ type BatchItemResult = {
   count: number;
   confidence?: number;
   error?: string;
+  transactions?: Transaction[];
 };
+type DownloadAllMode = "zip" | "combined";
 
 type ThemeName = "terminal" | "classic";
 type Theme = {
@@ -438,8 +440,8 @@ export default function App() {
   const [signConvention, setSignConvention] = useState<SignConvention>("native");
   const [exportTarget, setExportTarget] = useState<ExportTarget>("generic");
   const [exportFileType, setExportFileType] = useState<ExportFileType>("csv");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc">("date_desc");
+  const [downloadAllMode, setDownloadAllMode] = useState<DownloadAllMode>("zip");
+  const [sortByDate, setSortByDate] = useState<"date_desc" | "date_asc">("date_desc");
   const [themeName] = useState<ThemeName>("classic");
 
   const exportOptions = useMemo(
@@ -449,37 +451,21 @@ export default function App() {
 
   const preparedTransactions = useMemo(() => {
     const source = result?.transactions ?? [];
-    const needle = searchTerm.trim().toLowerCase();
-    let filtered = needle
-      ? source.filter((t) =>
-          `${t.date} ${t.description} ${t.sourceFile ?? ""}`.toLowerCase().includes(needle)
-        )
-      : source;
-
-    filtered = [...filtered].sort((a, b) => {
-      if (sortBy === "date_asc") return a.date.localeCompare(b.date);
-      if (sortBy === "date_desc") return b.date.localeCompare(a.date);
-      if (sortBy === "amount_asc") return a.amount - b.amount;
-      return b.amount - a.amount;
-    });
-    return filtered;
-  }, [result, searchTerm, sortBy]);
+    return [...source].sort((a, b) =>
+      sortByDate === "date_asc" ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)
+    );
+  }, [result, sortByDate]);
 
   const previewRows = useMemo(
     () => (preparedTransactions.length ? toExportRows(preparedTransactions, exportOptions) : []),
     [preparedTransactions, exportOptions]
   );
 
-  const csv = useMemo(
-    () => (preparedTransactions.length ? toCsv(preparedTransactions, exportOptions) : ""),
-    [preparedTransactions, exportOptions]
-  );
   const showDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
   const theme = THEMES[themeName];
   const isTerminal = themeName === "terminal";
   const hasTransactions = Boolean(result?.transactions?.length);
   const canConvert = files.length > 0 && !busy;
-  const canExport = hasTransactions;
   const showSourceColumn = batchResults.filter((b) => b.status === "success").length > 1;
   const analyticsContext = useMemo(
     () => ({
@@ -577,6 +563,10 @@ export default function App() {
             status: "success",
             count: parsed.transactions.length,
             confidence: parsed.confidence,
+            transactions: parsed.transactions.map((t) => ({
+              ...t,
+              sourceFile: file.name,
+            })),
           });
         } catch (e: any) {
           fileOutcomes.push({
@@ -615,38 +605,178 @@ export default function App() {
     }
   }
 
-  async function downloadExport() {
-    if (!preparedTransactions.length) return;
-
+  async function buildExportBlob(transactions: Transaction[]): Promise<{ blob: Blob; extension: string }> {
     let blob: Blob;
     let extension: string;
     if (exportFileType === "csv") {
-      blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      blob = new Blob([toCsv(transactions, exportOptions)], { type: "text/csv;charset=utf-8" });
       extension = "csv";
     } else if (exportFileType === "xlsx") {
-      blob = await toXlsx(preparedTransactions, exportOptions);
+      blob = await toXlsx(transactions, exportOptions);
       extension = "xlsx";
     } else if (exportFileType === "ofx") {
-      blob = new Blob([toOfx(preparedTransactions, exportOptions)], { type: "application/ofx" });
+      blob = new Blob([toOfx(transactions, exportOptions)], { type: "application/ofx" });
       extension = "ofx";
     } else {
-      blob = new Blob([toQif(preparedTransactions, exportOptions)], { type: "text/plain;charset=utf-8" });
+      blob = new Blob([toQif(transactions, exportOptions)], { type: "text/plain;charset=utf-8" });
       extension = "qif";
     }
+    return { blob, extension };
+  }
 
-    emitEvent("download_export", {
-      rows: preparedTransactions.length,
-      target: exportTarget,
-      fileType: exportFileType,
-    });
+  function baseName(fileName: string): string {
+    return fileName.replace(/\.pdf$/i, "").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+  }
 
+  function downloadBlob(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const suffix = exportFileType === "csv" || exportFileType === "xlsx" ? `-${exportTarget}` : "";
-    a.download = `transactions${suffix}.${extension}`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  const crcTable = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) {
+        c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(data: Uint8Array): number {
+    let c = 0xffffffff;
+    for (let i = 0; i < data.length; i += 1) {
+      c = crcTable[(c ^ data[i]) & 0xff] ^ (c >>> 8);
+    }
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  async function buildZipBlob(entries: { name: string; data: Uint8Array }[]): Promise<Blob> {
+    const localParts: Uint8Array[] = [];
+    const centralParts: Uint8Array[] = [];
+    let offset = 0;
+
+    function pushLE16(arr: number[], value: number) {
+      arr.push(value & 0xff, (value >>> 8) & 0xff);
+    }
+    function pushLE32(arr: number[], value: number) {
+      arr.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+    }
+
+    for (const entry of entries) {
+      const nameBytes = new TextEncoder().encode(entry.name);
+      const data = entry.data;
+      const checksum = crc32(data);
+      const localHeader: number[] = [];
+      pushLE32(localHeader, 0x04034b50);
+      pushLE16(localHeader, 20);
+      pushLE16(localHeader, 0);
+      pushLE16(localHeader, 0);
+      pushLE16(localHeader, 0);
+      pushLE16(localHeader, 0);
+      pushLE32(localHeader, checksum);
+      pushLE32(localHeader, data.length);
+      pushLE32(localHeader, data.length);
+      pushLE16(localHeader, nameBytes.length);
+      pushLE16(localHeader, 0);
+      localParts.push(new Uint8Array(localHeader), nameBytes, data);
+
+      const centralHeader: number[] = [];
+      pushLE32(centralHeader, 0x02014b50);
+      pushLE16(centralHeader, 20);
+      pushLE16(centralHeader, 20);
+      pushLE16(centralHeader, 0);
+      pushLE16(centralHeader, 0);
+      pushLE16(centralHeader, 0);
+      pushLE16(centralHeader, 0);
+      pushLE32(centralHeader, checksum);
+      pushLE32(centralHeader, data.length);
+      pushLE32(centralHeader, data.length);
+      pushLE16(centralHeader, nameBytes.length);
+      pushLE16(centralHeader, 0);
+      pushLE16(centralHeader, 0);
+      pushLE16(centralHeader, 0);
+      pushLE16(centralHeader, 0);
+      pushLE32(centralHeader, 0);
+      pushLE32(centralHeader, offset);
+      centralParts.push(new Uint8Array(centralHeader), nameBytes);
+
+      offset += 30 + nameBytes.length + data.length;
+    }
+
+    const centralSize = centralParts.reduce((sum, p) => sum + p.length, 0);
+    const end: number[] = [];
+    pushLE32(end, 0x06054b50);
+    pushLE16(end, 0);
+    pushLE16(end, 0);
+    pushLE16(end, entries.length);
+    pushLE16(end, entries.length);
+    pushLE32(end, centralSize);
+    pushLE32(end, offset);
+    pushLE16(end, 0);
+
+    const allParts = [...localParts, ...centralParts, new Uint8Array(end)];
+    const totalLength = allParts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(totalLength);
+    let cursor = 0;
+    for (const part of allParts) {
+      out.set(part, cursor);
+      cursor += part.length;
+    }
+    return new Blob([out.buffer as ArrayBuffer], { type: "application/zip" });
+  }
+
+  async function downloadFileResult(item: BatchItemResult) {
+    if (item.status !== "success" || !item.transactions?.length) return;
+    const { blob, extension } = await buildExportBlob(item.transactions);
+    emitEvent("download_export", {
+      rows: item.transactions.length,
+      target: exportTarget,
+      fileType: exportFileType,
+      source: item.fileName,
+    });
+    downloadBlob(blob, `${baseName(item.fileName)}.${extension}`);
+  }
+
+  async function downloadAllResults() {
+    const successful = batchResults.filter((item) => item.status === "success" && item.transactions?.length);
+    if (!successful.length) return;
+
+    if (downloadAllMode === "combined") {
+      const combined: Transaction[] = successful.flatMap((item) => item.transactions as Transaction[]);
+      const { blob, extension } = await buildExportBlob(combined);
+      emitEvent("download_export", {
+        rows: combined.length,
+        target: exportTarget,
+        fileType: exportFileType,
+        files: successful.length,
+        mode: "combined",
+      });
+      downloadBlob(blob, `combined-output.${extension}`);
+      return;
+    }
+
+    const entries: { name: string; data: Uint8Array }[] = [];
+    for (const item of successful) {
+      const { blob, extension } = await buildExportBlob(item.transactions as Transaction[]);
+      const data = new Uint8Array(await blob.arrayBuffer());
+      entries.push({ name: `${baseName(item.fileName)}.${extension}`, data });
+    }
+    const zipBlob = await buildZipBlob(entries);
+    emitEvent("download_export", {
+      rows: successful.reduce((sum, item) => sum + (item.transactions?.length ?? 0), 0),
+      target: exportTarget,
+      fileType: exportFileType,
+      files: successful.length,
+      mode: "all_zip",
+    });
+    downloadBlob(zipBlob, "banksheet-exports.zip");
   }
 
   return (
@@ -659,7 +789,7 @@ export default function App() {
             <h1 style={{ marginBottom: 0, marginTop: 0, fontFamily: theme.fontHeading, color: theme.heading, letterSpacing: isTerminal ? 1.2 : 0.2, textTransform: isTerminal ? "uppercase" : "none", fontSize: isTerminal ? 30 : 46 }}>BankSheet</h1>
           </div>
           <p style={{ marginTop: 0, marginBottom: 0, color: theme.muted, fontFamily: isTerminal ? theme.tableFont : theme.fontBody }}>
-        Upload your statement, review transactions, export CSV or XLSX.
+        Upload your statements, review transactions, export.
       </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, borderLeft: isTerminal ? `1px solid ${theme.panelBorder}` : "none", paddingLeft: isTerminal ? 12 : 0 }}>
@@ -690,7 +820,7 @@ export default function App() {
             />
             <div style={{ width: "100%", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 14 }}>
               {[
-                { label: "1. Select PDF", id: "select" as const },
+                { label: "1. Select PDF files", id: "select" as const },
                 { label: "2. Convert", id: "convert" as const },
                 { label: "3. Export", id: "export" as const },
               ].map((step) => (
@@ -776,11 +906,20 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "end", gap: 16, minWidth: 0 }}>
-            <div style={{ maxWidth: 400, width: "100%", border: `1px solid ${theme.panelBorder}`, borderRadius: theme.sectionRadius, padding: 10, background: theme.controlBg, boxSizing: "border-box", minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Transaction Settings</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div
+            style={{
+              border: `1px solid ${theme.panelBorder}`,
+              borderRadius: theme.sectionRadius,
+              padding: 10,
+              background: theme.controlBg,
+              boxSizing: "border-box",
+              minWidth: 0,
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 1px minmax(0, 1fr)", alignItems: "stretch", gap: 16, minWidth: 0 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Transaction Settings</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap", justifyContent: "flex-start" }}>
                   <label style={{ fontSize: 13 }}>
                     Amount columns:
                   </label>
@@ -809,107 +948,142 @@ export default function App() {
                     Debit/Credit
                   </button>
                 </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <label style={{ fontSize: 13 }}>
-                  Amount signs:
-                </label>
-                <button
-                  onClick={() => setSignConvention("native")}
-                  style={{
-                    padding: "6px 10px",
-                    border: `1px solid ${theme.controlBorder}`,
-                    background: signConvention === "native" ? theme.controlActiveBg : theme.controlBg,
-                    color: theme.pageFg,
-                    borderRadius: theme.sectionRadius,
-                  }}
-                >
-                  As Statement
-                </button>
-                <button
-                  onClick={() => setSignConvention("inverted")}
-                  style={{
-                    padding: "6px 10px",
-                    border: `1px solid ${theme.controlBorder}`,
-                    background: signConvention === "inverted" ? theme.controlActiveBg : theme.controlBg,
-                    color: theme.pageFg,
-                    borderRadius: theme.sectionRadius,
-                  }}
-                >
-                  Flip +/-
-                </button>
-              </div>
-            </div>
-            <div style={{ minWidth: 360, maxWidth: 460, width: "100%", border: `1px solid ${theme.panelBorder}`, borderRadius: theme.sectionRadius, padding: 10, background: theme.controlBg, boxSizing: "border-box" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Export Settings</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                <label style={{ fontSize: 13 }}>Format:</label>
-                {([
-                  { id: "csv", label: "CSV" },
-                  { id: "xlsx", label: "XLSX" },
-                  { id: "ofx", label: "OFX" },
-                  { id: "qif", label: "QIF" },
-                ] as { id: ExportFileType; label: string }[]).map((fmt) => (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-start" }}>
+                  <label style={{ fontSize: 13 }}>
+                    Amount signs:
+                  </label>
                   <button
-                    key={fmt.id}
-                    onClick={() => setExportFileType(fmt.id)}
+                    onClick={() => setSignConvention("native")}
                     style={{
                       padding: "6px 10px",
                       border: `1px solid ${theme.controlBorder}`,
-                      background: exportFileType === fmt.id ? theme.controlActiveBg : theme.controlBg,
+                      background: signConvention === "native" ? theme.controlActiveBg : theme.controlBg,
                       color: theme.pageFg,
                       borderRadius: theme.sectionRadius,
                     }}
                   >
-                    {fmt.label}
+                    As Statement
                   </button>
-                ))}
-              </div>
-              {(exportFileType === "csv" || exportFileType === "xlsx") && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                  <label style={{ fontSize: 13 }}>Target:</label>
-                  {([
-                    { id: "generic", label: "Generic" },
-                    { id: "xero", label: "Xero" },
-                    { id: "quickbooks", label: "QuickBooks" },
-                    { id: "myob", label: "MYOB" },
-                  ] as { id: ExportTarget; label: string }[]).map((target) => (
-                    <button
-                      key={target.id}
-                      onClick={() => setExportTarget(target.id)}
-                      style={{
-                        padding: "6px 10px",
-                        border: `1px solid ${theme.controlBorder}`,
-                        background: exportTarget === target.id ? theme.controlActiveBg : theme.controlBg,
-                        color: theme.pageFg,
-                        borderRadius: theme.sectionRadius,
-                      }}
-                    >
-                      {target.label}
-                    </button>
-                  ))}
+                  <button
+                    onClick={() => setSignConvention("inverted")}
+                    style={{
+                      padding: "6px 10px",
+                      border: `1px solid ${theme.controlBorder}`,
+                      background: signConvention === "inverted" ? theme.controlActiveBg : theme.controlBg,
+                      color: theme.pageFg,
+                      borderRadius: theme.sectionRadius,
+                    }}
+                  >
+                    Flip +/-
+                  </button>
                 </div>
-              )}
-              <button
-                disabled={!canExport}
-                onClick={downloadExport}
-                style={actionButtonStyle(!canExport, "large")}
-              >
-                Download
-              </button>
+              </div>
+              <div style={{ width: 1, background: theme.panelBorder, alignSelf: "stretch" }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 14 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Export Settings</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8, justifyContent: "flex-start" }}>
+                      <label style={{ fontSize: 13 }}>Format:</label>
+                      {([
+                        { id: "csv", label: "CSV" },
+                        { id: "xlsx", label: "XLSX" },
+                        { id: "ofx", label: "OFX" },
+                        { id: "qif", label: "QIF" },
+                      ] as { id: ExportFileType; label: string }[]).map((fmt) => (
+                        <button
+                          key={fmt.id}
+                          onClick={() => setExportFileType(fmt.id)}
+                          style={{
+                            padding: "6px 10px",
+                            border: `1px solid ${theme.controlBorder}`,
+                            background: exportFileType === fmt.id ? theme.controlActiveBg : theme.controlBg,
+                            color: theme.pageFg,
+                            borderRadius: theme.sectionRadius,
+                          }}
+                        >
+                          {fmt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {(exportFileType === "csv" || exportFileType === "xlsx") && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-start" }}>
+                        <label style={{ fontSize: 13 }}>Target:</label>
+                        {([
+                          { id: "generic", label: "Generic" },
+                          { id: "xero", label: "Xero" },
+                          { id: "quickbooks", label: "QuickBooks" },
+                          { id: "myob", label: "MYOB" },
+                        ] as { id: ExportTarget; label: string }[]).map((target) => (
+                          <button
+                            key={target.id}
+                            onClick={() => setExportTarget(target.id)}
+                            style={{
+                              padding: "6px 10px",
+                              border: `1px solid ${theme.controlBorder}`,
+                              background: exportTarget === target.id ? theme.controlActiveBg : theme.controlBg,
+                              color: theme.pageFg,
+                              borderRadius: theme.sectionRadius,
+                            }}
+                          >
+                            {target.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         {batchResults.length > 0 && (
           <div style={{ marginTop: 12, border: `1px solid ${theme.panelBorder}`, padding: 10, background: theme.controlBg }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Batch results</div>
-            <div style={{ display: "grid", gap: 4 }}>
-              {batchResults.map((item, idx) => (
-                <div key={`${item.fileName}-${idx}`} style={{ fontSize: 13, color: item.status === "error" ? "#b00020" : theme.pageFg }}>
-                  {item.fileName}: {item.status === "success" ? `${item.count} transactions` : `failed (${item.error ?? "unknown error"})`}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16, alignItems: "stretch" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Files processed</div>
+                <div style={{ display: "grid", gap: 4 }}>
+                  {batchResults.map((item, idx) => (
+                    <div key={`${item.fileName}-${idx}`} style={{ fontSize: 13, color: item.status === "error" ? "#b00020" : theme.pageFg, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        disabled={item.status !== "success" || !item.transactions?.length}
+                        onClick={() => void downloadFileResult(item)}
+                        style={actionButtonStyle(item.status !== "success" || !item.transactions?.length, "default")}
+                      >
+                        Download
+                      </button>
+                      <span>{item.fileName}: {item.status === "success" ? `${item.count} transactions` : `failed (${item.error ?? "unknown error"})`}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <label htmlFor="download-all-mode" style={{ fontSize: 13 }}>Download All:</label>
+                  <select
+                    id="download-all-mode"
+                    value={downloadAllMode}
+                    onChange={(e) => setDownloadAllMode(e.target.value as DownloadAllMode)}
+                    style={{
+                      padding: "6px 8px",
+                      border: `1px solid ${theme.controlBorder}`,
+                      background: theme.controlBg,
+                      color: theme.pageFg,
+                    }}
+                  >
+                    <option value="zip">As ZIP (separate files)</option>
+                    <option value="combined">As one combined file</option>
+                  </select>
+                  <button
+                    disabled={!batchResults.some((item) => item.status === "success" && item.transactions?.length)}
+                    onClick={() => void downloadAllResults()}
+                    style={actionButtonStyle(!batchResults.some((item) => item.status === "success" && item.transactions?.length), "default")}
+                  >
+                    Download
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -923,7 +1097,7 @@ export default function App() {
         {busy && (
           <div style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: theme.muted, fontSize: 14, textAlign: "center" }}>
             <span style={spinnerStyle(theme)} aria-hidden="true" />
-            <span>PDF selected. Reading transactions...</span>
+            <span>Reading transactions...</span>
           </div>
         )}
 
@@ -935,22 +1109,12 @@ export default function App() {
                 {typeof result.confidence === "number" && <div><strong>Confidence:</strong> {(result.confidence * 100).toFixed(0)}%</div>}
                 <div><strong>Warnings:</strong> {result.warnings?.length ?? 0}</div>
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search transactions"
-                  style={{
-                    padding: "6px 8px",
-                    border: `1px solid ${theme.controlBorder}`,
-                    background: theme.controlBg,
-                    color: theme.pageFg,
-                    minWidth: 180,
-                  }}
-                />
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label htmlFor="date-sort" style={{ fontSize: 13 }}>Sort by date:</label>
                 <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "amount_desc" | "amount_asc")}
+                  id="date-sort"
+                  value={sortByDate}
+                  onChange={(e) => setSortByDate(e.target.value as "date_desc" | "date_asc")}
                   style={{
                     padding: "6px 8px",
                     border: `1px solid ${theme.controlBorder}`,
@@ -958,10 +1122,8 @@ export default function App() {
                     color: theme.pageFg,
                   }}
                 >
-                  <option value="date_desc">Date: newest</option>
-                  <option value="date_asc">Date: oldest</option>
-                  <option value="amount_desc">Amount: high to low</option>
-                  <option value="amount_asc">Amount: low to high</option>
+                  <option value="date_desc">Newest first</option>
+                  <option value="date_asc">Oldest first</option>
                 </select>
               </div>
             </div>
