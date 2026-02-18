@@ -5,8 +5,7 @@ const ALLOWED_EVENTS = new Set([
   "convert_clicked",
   "convert_success",
   "convert_error",
-  "download_csv",
-  "download_xlsx",
+  "download_export",
   "contact_clicked",
 ]);
 

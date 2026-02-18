@@ -20,6 +20,7 @@ type ParseResponse = {
 type ExportFormat = "signed" | "split";
 type SignConvention = "native" | "inverted";
 type ExportTarget = "generic" | "xero" | "quickbooks" | "myob";
+type ExportFileType = "csv" | "xlsx" | "ofx" | "qif";
 type ExportOptions = {
   includeCurrency: boolean;
   format: ExportFormat;
@@ -112,8 +113,7 @@ type AnalyticsEventName =
   | "convert_clicked"
   | "convert_success"
   | "convert_error"
-  | "download_csv"
-  | "download_xlsx"
+  | "download_export"
   | "contact_clicked";
 
 function trackEvent(
@@ -261,6 +261,16 @@ function targetHeaders(options: ExportOptions): string[] {
   return headers;
 }
 
+function isoToOfxDate(iso: string): string {
+  const cleaned = iso.replace(/-/g, "");
+  return `${cleaned}000000`;
+}
+
+function isoToQifDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${m}/${d}/${y}`;
+}
+
 function toTargetRecords(transactions: Transaction[], options: ExportOptions): Record<string, string | number>[] {
   const rows = toExportRows(transactions, options);
   if (options.target === "xero") {
@@ -322,6 +332,74 @@ function toCsv(transactions: Transaction[], options: ExportOptions): string {
   return [headers.join(","), ...body].join("\n");
 }
 
+function toOfx(transactions: Transaction[], options: ExportOptions): string {
+  const rows = toExportRows(transactions, options);
+  const body = rows
+    .map((row, idx) => {
+      const amount = rowSignedAmount(row).toFixed(2);
+      const trnType = Number(amount) < 0 ? "DEBIT" : "CREDIT";
+      const memo = (row.description || "").replace(/[<&>]/g, " ").slice(0, 120);
+      const fitid = `${row.date}-${idx}-${Math.abs(Number(amount)).toFixed(2)}`;
+      return [
+        "<STMTTRN>",
+        `<TRNTYPE>${trnType}`,
+        `<DTPOSTED>${isoToOfxDate(row.date)}`,
+        `<TRNAMT>${amount}`,
+        `<FITID>${fitid}`,
+        `<NAME>${memo.slice(0, 32)}`,
+        `<MEMO>${memo}`,
+        "</STMTTRN>",
+      ].join("\n");
+    })
+    .join("\n");
+
+  return [
+    "OFXHEADER:100",
+    "DATA:OFXSGML",
+    "VERSION:102",
+    "SECURITY:NONE",
+    "ENCODING:USASCII",
+    "CHARSET:1252",
+    "COMPRESSION:NONE",
+    "OLDFILEUID:NONE",
+    "NEWFILEUID:NONE",
+    "",
+    "<OFX>",
+    "<BANKMSGSRSV1>",
+    "<STMTTRNRS>",
+    "<TRNUID>1",
+    "<STATUS><CODE>0<SEVERITY>INFO</STATUS>",
+    "<STMTRS>",
+    "<CURDEF>AUD",
+    "<BANKACCTFROM>",
+    "<BANKID>000000",
+    "<ACCTID>000000000",
+    "<ACCTTYPE>CHECKING",
+    "</BANKACCTFROM>",
+    "<BANKTRANLIST>",
+    body,
+    "</BANKTRANLIST>",
+    "</STMTRS>",
+    "</STMTTRNRS>",
+    "</BANKMSGSRSV1>",
+    "</OFX>",
+    "",
+  ].join("\n");
+}
+
+function toQif(transactions: Transaction[], options: ExportOptions): string {
+  const rows = toExportRows(transactions, options);
+  const lines = ["!Type:Bank"];
+  for (const row of rows) {
+    lines.push(`D${isoToQifDate(row.date)}`);
+    lines.push(`T${rowSignedAmount(row).toFixed(2)}`);
+    lines.push(`P${(row.description || "").replace(/\r?\n/g, " ").slice(0, 120)}`);
+    lines.push("^");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 function spinnerStyle(theme: Theme) {
   return {
     width: 14,
@@ -359,6 +437,7 @@ export default function App() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>("signed");
   const [signConvention, setSignConvention] = useState<SignConvention>("native");
   const [exportTarget, setExportTarget] = useState<ExportTarget>("generic");
+  const [exportFileType, setExportFileType] = useState<ExportFileType>("csv");
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc">("date_desc");
   const [themeName] = useState<ThemeName>("classic");
@@ -536,26 +615,36 @@ export default function App() {
     }
   }
 
-  function downloadCsv() {
-    if (!csv) return;
-    emitEvent("download_csv", { rows: preparedTransactions.length, target: exportTarget });
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `transactions-${exportTarget}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function downloadXlsx() {
+  async function downloadExport() {
     if (!preparedTransactions.length) return;
-    emitEvent("download_xlsx", { rows: preparedTransactions.length, target: exportTarget });
-    const blob = await toXlsx(preparedTransactions, exportOptions);
+
+    let blob: Blob;
+    let extension: string;
+    if (exportFileType === "csv") {
+      blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      extension = "csv";
+    } else if (exportFileType === "xlsx") {
+      blob = await toXlsx(preparedTransactions, exportOptions);
+      extension = "xlsx";
+    } else if (exportFileType === "ofx") {
+      blob = new Blob([toOfx(preparedTransactions, exportOptions)], { type: "application/ofx" });
+      extension = "ofx";
+    } else {
+      blob = new Blob([toQif(preparedTransactions, exportOptions)], { type: "text/plain;charset=utf-8" });
+      extension = "qif";
+    }
+
+    emitEvent("download_export", {
+      rows: preparedTransactions.length,
+      target: exportTarget,
+      fileType: exportFileType,
+    });
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `transactions-${exportTarget}.xlsx`;
+    const suffix = exportFileType === "csv" || exportFileType === "xlsx" ? `-${exportTarget}` : "";
+    a.download = `transactions${suffix}.${extension}`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -689,7 +778,7 @@ export default function App() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "end", gap: 16, minWidth: 0 }}>
             <div style={{ maxWidth: 400, width: "100%", border: `1px solid ${theme.panelBorder}`, borderRadius: theme.sectionRadius, padding: 10, background: theme.controlBg, boxSizing: "border-box", minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Export Settings</div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Transaction Settings</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <label style={{ fontSize: 13 }}>
@@ -750,37 +839,64 @@ export default function App() {
                   Flip +/-
                 </button>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                <label style={{ fontSize: 13 }}>Export target:</label>
+            </div>
+            <div style={{ minWidth: 360, maxWidth: 460, width: "100%", border: `1px solid ${theme.panelBorder}`, borderRadius: theme.sectionRadius, padding: 10, background: theme.controlBg, boxSizing: "border-box" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, textTransform: isTerminal ? "uppercase" : "none", letterSpacing: isTerminal ? 0.8 : 0 }}>Export Settings</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <label style={{ fontSize: 13 }}>Format:</label>
                 {([
-                  { id: "generic", label: "Generic" },
-                  { id: "xero", label: "Xero" },
-                  { id: "quickbooks", label: "QuickBooks" },
-                  { id: "myob", label: "MYOB" },
-                ] as { id: ExportTarget; label: string }[]).map((target) => (
+                  { id: "csv", label: "CSV" },
+                  { id: "xlsx", label: "XLSX" },
+                  { id: "ofx", label: "OFX" },
+                  { id: "qif", label: "QIF" },
+                ] as { id: ExportFileType; label: string }[]).map((fmt) => (
                   <button
-                    key={target.id}
-                    onClick={() => setExportTarget(target.id)}
+                    key={fmt.id}
+                    onClick={() => setExportFileType(fmt.id)}
                     style={{
                       padding: "6px 10px",
                       border: `1px solid ${theme.controlBorder}`,
-                      background: exportTarget === target.id ? theme.controlActiveBg : theme.controlBg,
+                      background: exportFileType === fmt.id ? theme.controlActiveBg : theme.controlBg,
                       color: theme.pageFg,
                       borderRadius: theme.sectionRadius,
                     }}
                   >
-                    {target.label}
+                    {fmt.label}
                   </button>
                 ))}
               </div>
-            </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button disabled={!canExport} onClick={downloadCsv} style={actionButtonStyle(!canExport, "large")}>
-                  Download CSV
-                </button>
-                <button disabled={!canExport} onClick={downloadXlsx} style={actionButtonStyle(!canExport, "large")}>
-                  Download XLSX
-                </button>
+              {(exportFileType === "csv" || exportFileType === "xlsx") && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <label style={{ fontSize: 13 }}>Target:</label>
+                  {([
+                    { id: "generic", label: "Generic" },
+                    { id: "xero", label: "Xero" },
+                    { id: "quickbooks", label: "QuickBooks" },
+                    { id: "myob", label: "MYOB" },
+                  ] as { id: ExportTarget; label: string }[]).map((target) => (
+                    <button
+                      key={target.id}
+                      onClick={() => setExportTarget(target.id)}
+                      style={{
+                        padding: "6px 10px",
+                        border: `1px solid ${theme.controlBorder}`,
+                        background: exportTarget === target.id ? theme.controlActiveBg : theme.controlBg,
+                        color: theme.pageFg,
+                        borderRadius: theme.sectionRadius,
+                      }}
+                    >
+                      {target.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                disabled={!canExport}
+                onClick={downloadExport}
+                style={actionButtonStyle(!canExport, "large")}
+              >
+                Download
+              </button>
             </div>
           </div>
         </div>
