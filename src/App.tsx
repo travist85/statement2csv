@@ -165,13 +165,30 @@ async function getUploadUrl(file: File): Promise<{ uploadUrl: string; key: strin
   return resp.json();
 }
 
-async function uploadToR2(uploadUrl: string, file: File): Promise<void> {
-  const put = await fetch(uploadUrl, {
-    method: "PUT",
+async function uploadToR2(uploadUrl: string, key: string, file: File): Promise<void> {
+  try {
+    const put = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/pdf" },
+      body: file,
+    });
+    if (!put.ok) throw new Error(`R2 upload failed: ${put.status}`);
+    return;
+  } catch {
+    // Some browsers/extensions/network policies can block cross-origin presigned PUTs.
+    // Fall back to same-origin proxy upload to keep conversion working.
+  }
+
+  const url = new URL("/api/upload-proxy", window.location.origin);
+  url.searchParams.set("key", key);
+  url.searchParams.set("contentType", file.type || "application/pdf");
+
+  const proxy = await fetch(url.toString(), {
+    method: "POST",
     headers: { "Content-Type": file.type || "application/pdf" },
     body: file,
   });
-  if (!put.ok) throw new Error(`R2 upload failed: ${put.status}`);
+  if (!proxy.ok) throw new Error(`upload proxy failed: ${proxy.status}`);
 }
 
 async function parseFromKey(key: string): Promise<ParseResponse> {
@@ -393,7 +410,7 @@ export default function App() {
     setBusy(true);
     try {
       const { uploadUrl, key } = await getUploadUrl(file);
-      await uploadToR2(uploadUrl, file);
+      await uploadToR2(uploadUrl, key, file);
       const parsed = await parseFromKey(key);
       setResult(parsed);
       emitEvent("convert_success", {
