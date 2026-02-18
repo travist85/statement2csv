@@ -23,3 +23,6 @@ Last updated: 2026-02-17
   - pull forward if scanned-PDF demand dominates feedback.
 - Rename timing:
   - keep `statement2csv` during MVP, move to `BankSheet`/`BankSheets` post-traction.
+- Pricing model details:
+  - validate performance-based pricing direction (`no results, no fee`),
+  - define what qualifies as a "successful result" for billing.

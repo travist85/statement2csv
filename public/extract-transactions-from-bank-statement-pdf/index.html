@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Extract Transactions from Bank Statement PDF | BankSheet</title>
+  <meta name="description" content="Extract transactions from bank statement PDFs into structured CSV/XLSX exports for bookkeeping, analysis, and reconciliation." />
+  <link rel="canonical" href="https://banksheet.co/extract-transactions-from-bank-statement-pdf/" />
+  <style>
+    :root { --bg:#f4f0e7; --panel:#fcfaf5; --text:#1f1b16; --muted:#675f53; --border:#cfc3b1; --accent:#7f4f24; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:"Source Sans 3","Segoe UI",sans-serif; }
+    main { max-width: 900px; margin: 0 auto; padding: 28px 16px 48px; }
+    .card { background:var(--panel); border:1px solid var(--border); padding:20px; }
+    h1,h2,h3 { margin-top:0; }
+    p,li { line-height:1.5; }
+    .muted { color: var(--muted); }
+    .cta { display:inline-block; margin-top:8px; border:1px solid var(--accent); background:#efe3d1; color:var(--text); padding:10px 14px; text-decoration:none; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="/">BankSheet</a></p>
+    <div class="card">
+      <h1>Extract Transactions from a Bank Statement PDF</h1>
+      <p>BankSheet extracts transaction rows from bank statement PDFs and outputs structured data you can review and export to CSV or XLSX.</p>
+
+      <h2>Most useful when</h2>
+      <ul>
+        <li>Bank feeds are unavailable or incomplete</li>
+        <li>Only PDF statements exist for a required period</li>
+        <li>Catch-up bookkeeping needs historical transactions quickly</li>
+        <li>Manual re-entry is too slow and error-prone</li>
+      </ul>
+
+      <h2>What BankSheet does</h2>
+      <ul>
+        <li>Identifies transaction rows in statement text</li>
+        <li>Extracts key fields (date, description, amount, balance where present)</li>
+        <li>Provides preview before export</li>
+        <li>Exports to CSV or XLSX</li>
+      </ul>
+
+      <h2>Privacy</h2>
+      <p>Statement files and transaction data are deleted after conversion.</p>
+
+      <p><a class="cta" href="/">Upload a statement PDF -> Extract transactions</a></p>
+
+      <h2>FAQ</h2>
+      <h3>Will this work on scanned PDFs?</h3>
+      <p>Scanned/image-only PDFs are harder to parse reliably. Current MVP works best with text-based PDFs.</p>
+
+      <h3>How do I validate the output quickly?</h3>
+      <p>Use the preview to spot-check dates, totals, signs, and missing lines before exporting.</p>
+
+      <h3>What extraction issues are most common?</h3>
+      <p>Layout differences (wrapped descriptions, running balances, multi-line rows). These are the main reliability edge cases and are actively improved over time.</p>
+    </div>
+    <p class="muted" style="margin-top:16px;">BankSheet v0.1.0 (Public Beta)</p>
+  </main>
+</body>
+</html>

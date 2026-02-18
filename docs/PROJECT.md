@@ -27,3 +27,9 @@ Current delivery target:
 
 - Working name: `statement2csv`
 - Planned rename: likely `BankSheet` / `BankSheets` after early traction validation
+
+## Related docs
+
+- Product definition: `docs/PRODUCT.md`
+- Roadmap and scope: `docs/ROADMAP.md`
+- SEO operating system: `docs/SEO_OPERATIONS_PLAN.md`

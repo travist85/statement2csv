@@ -15,12 +15,12 @@ Web tool to convert text-based bank statement PDFs into structured transaction e
 Current flow:
 - upload statement PDF
 - parse and preview transactions
-- export CSV
+- export CSV/XLSX
 
 Current export options:
 - single signed amount or split debit/credit columns
 - sign handling controls
-- optional currency column
+- CSV or XLSX download
 
 ## Category and positioning
 
@@ -74,7 +74,15 @@ Useful reference from `PRODUCT_CONTEXT_FROM_CHATGPT.md`:
 What we are intentionally not assuming yet:
 - immediate feature parity with all incumbent exports
 - broad bank coverage before first traction
-- pricing model before validation
+
+## Pricing direction (MVP validation)
+
+Working pricing hypothesis to validate:
+- performance-based pricing (`no results, no fee`)
+
+Interpretation:
+- if a conversion produces no usable transaction output, user should not be charged
+- monetization should align to successful conversion outcomes, not raw upload attempts
 
 ## Parsing strategy: open decision
 
@@ -98,3 +106,6 @@ Until real engagement appears, prioritize:
 - fast bug turnaround from user-reported samples
 
 Avoid adding broad new feature surface before this signal exists.
+
+Related execution doc:
+- `docs/SEO_OPERATIONS_PLAN.md`

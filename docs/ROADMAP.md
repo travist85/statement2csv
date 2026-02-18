@@ -4,6 +4,9 @@
 
 Goal: get real usage and feedback before building more features.
 
+Execution system for organic distribution:
+- `docs/SEO_OPERATIONS_PLAN.md`
+
 What we are optimizing for:
 - upload PDF -> convert -> download usable CSV
 - clear trust messaging (privacy + delete-after-conversion)
@@ -15,6 +18,7 @@ What we are optimizing for:
 - keep export options clear and simple
 - collect issues/questions from early users
 - keep deployment and rollback process stable
+- validate performance-based pricing assumption (`no results, no fee`)
 
 ## Out of scope until traction
 
