@@ -344,6 +344,11 @@ export default function App() {
       : "convert";
 
   useEffect(() => {
+    if (window.location.hostname === "www.banksheet.co") {
+      const target = `https://banksheet.co${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.location.replace(target);
+      return;
+    }
     emitEvent("page_view");
   }, []);
 
