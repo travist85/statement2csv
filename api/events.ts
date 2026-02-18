@@ -7,7 +7,7 @@ const ALLOWED_EVENTS = new Set([
   "convert_error",
   "download_csv",
   "download_xlsx",
-  "report_issue_clicked",
+  "contact_clicked",
 ]);
 
 function sanitizeMeta(input: unknown): Record<string, string | number | boolean | null> | undefined {

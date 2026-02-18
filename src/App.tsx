@@ -6,6 +6,7 @@ type Transaction = {
   amount: number; // signed (debit negative, credit positive)
   currency?: string;
   balance?: number;
+  sourceFile?: string;
 };
 
 type ParseResponse = {
@@ -18,10 +19,12 @@ type ParseResponse = {
 
 type ExportFormat = "signed" | "split";
 type SignConvention = "native" | "inverted";
+type ExportTarget = "generic" | "xero" | "quickbooks" | "myob";
 type ExportOptions = {
   includeCurrency: boolean;
   format: ExportFormat;
   signConvention: SignConvention;
+  target: ExportTarget;
 };
 
 type ExportRow = {
@@ -32,6 +35,14 @@ type ExportRow = {
   credit?: number;
   currency?: string;
   balance?: number;
+};
+
+type BatchItemResult = {
+  fileName: string;
+  status: "success" | "error";
+  count: number;
+  confidence?: number;
+  error?: string;
 };
 
 type ThemeName = "terminal" | "classic";
@@ -103,7 +114,7 @@ type AnalyticsEventName =
   | "convert_error"
   | "download_csv"
   | "download_xlsx"
-  | "report_issue_clicked";
+  | "contact_clicked";
 
 function trackEvent(
   name: AnalyticsEventName,
@@ -233,16 +244,72 @@ function toExportRows(transactions: Transaction[], options: ExportOptions): Expo
   });
 }
 
-function toCsv(transactions: Transaction[], options: ExportOptions): string {
+function rowSignedAmount(row: ExportRow): number {
+  if (typeof row.amount === "number") return row.amount;
+  return (row.credit ?? 0) - (row.debit ?? 0);
+}
+
+function targetHeaders(options: ExportOptions): string[] {
+  if (options.target === "xero") return ["Date", "Amount", "Payee", "Description", "Reference"];
+  if (options.target === "quickbooks") return ["Date", "Description", "Debit", "Credit", "Balance"];
+  if (options.target === "myob") return ["Date", "Description", "Amount", "Memo", "Balance"];
+
+  const headers = ["Date", "Description"];
+  if (options.format === "split") headers.push("Debit", "Credit");
+  else headers.push("Amount");
+  headers.push("Balance");
+  return headers;
+}
+
+function toTargetRecords(transactions: Transaction[], options: ExportOptions): Record<string, string | number>[] {
   const rows = toExportRows(transactions, options);
-  const headers = ["date", "description"];
-  if (options.format === "split") {
-    headers.push("debit", "credit");
-  } else {
-    headers.push("amount");
+  if (options.target === "xero") {
+    return rows.map((row) => ({
+      Date: row.date,
+      Amount: rowSignedAmount(row),
+      Payee: row.description.slice(0, 80),
+      Description: row.description,
+      Reference: "",
+    }));
   }
-  if (options.includeCurrency) headers.push("currency");
-  headers.push("balance");
+  if (options.target === "quickbooks") {
+    return rows.map((row) => ({
+      Date: row.date,
+      Description: row.description,
+      Debit: row.debit ?? (rowSignedAmount(row) < 0 ? Math.abs(rowSignedAmount(row)) : ""),
+      Credit: row.credit ?? (rowSignedAmount(row) > 0 ? rowSignedAmount(row) : ""),
+      Balance: row.balance ?? "",
+    }));
+  }
+  if (options.target === "myob") {
+    return rows.map((row) => ({
+      Date: row.date,
+      Description: row.description,
+      Amount: rowSignedAmount(row),
+      Memo: "",
+      Balance: row.balance ?? "",
+    }));
+  }
+
+  return rows.map((row) => {
+    const base: Record<string, string | number> = {
+      Date: row.date,
+      Description: row.description,
+    };
+    if (options.format === "split") {
+      base.Debit = row.debit ?? "";
+      base.Credit = row.credit ?? "";
+    } else {
+      base.Amount = row.amount ?? "";
+    }
+    base.Balance = row.balance ?? "";
+    return base;
+  });
+}
+
+function toCsv(transactions: Transaction[], options: ExportOptions): string {
+  const records = toTargetRecords(transactions, options);
+  const headers = targetHeaders(options);
 
   const esc = (v: unknown) => {
     const s = v == null ? "" : String(v);
@@ -250,17 +317,7 @@ function toCsv(transactions: Transaction[], options: ExportOptions): string {
     return s;
   };
 
-  const body = rows.map((row) => {
-    const values: unknown[] = [row.date, row.description];
-    if (options.format === "split") {
-      values.push(row.debit ?? "", row.credit ?? "");
-    } else {
-      values.push(row.amount ?? "");
-    }
-    if (options.includeCurrency) values.push(row.currency ?? "");
-    values.push(row.balance ?? "");
-    return values.map(esc).join(",");
-  });
+  const body = records.map((row) => headers.map((h) => esc(row[h] ?? "")).join(","));
 
   return [headers.join(","), ...body].join("\n");
 }
@@ -279,27 +336,7 @@ function spinnerStyle(theme: Theme) {
 
 async function toXlsx(transactions: Transaction[], options: ExportOptions): Promise<Blob> {
   const XLSX = await import("xlsx");
-  const rows = toExportRows(transactions, options);
-  const data = rows.map((row) => {
-    const base: Record<string, string | number> = {
-      Date: row.date,
-      Description: row.description,
-    };
-
-    if (options.format === "split") {
-      base.Debit = row.debit ?? "";
-      base.Credit = row.credit ?? "";
-    } else {
-      base.Amount = row.amount ?? "";
-    }
-
-    if (options.includeCurrency) {
-      base.Currency = row.currency ?? "";
-    }
-
-    base.Balance = row.balance ?? "";
-    return base;
-  });
+  const data = toTargetRecords(transactions, options);
 
   const worksheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
@@ -312,36 +349,59 @@ async function toXlsx(transactions: Transaction[], options: ExportOptions): Prom
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ParseResponse | null>(null);
+  const [batchResults, setBatchResults] = useState<BatchItemResult[]>([]);
   const [includeCurrency] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("signed");
   const [signConvention, setSignConvention] = useState<SignConvention>("native");
+  const [exportTarget, setExportTarget] = useState<ExportTarget>("generic");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc">("date_desc");
   const [themeName] = useState<ThemeName>("classic");
 
   const exportOptions = useMemo(
-    () => ({ includeCurrency, format: exportFormat, signConvention }),
-    [includeCurrency, exportFormat, signConvention]
+    () => ({ includeCurrency, format: exportFormat, signConvention, target: exportTarget }),
+    [includeCurrency, exportFormat, signConvention, exportTarget]
   );
 
+  const preparedTransactions = useMemo(() => {
+    const source = result?.transactions ?? [];
+    const needle = searchTerm.trim().toLowerCase();
+    let filtered = needle
+      ? source.filter((t) =>
+          `${t.date} ${t.description} ${t.sourceFile ?? ""}`.toLowerCase().includes(needle)
+        )
+      : source;
+
+    filtered = [...filtered].sort((a, b) => {
+      if (sortBy === "date_asc") return a.date.localeCompare(b.date);
+      if (sortBy === "date_desc") return b.date.localeCompare(a.date);
+      if (sortBy === "amount_asc") return a.amount - b.amount;
+      return b.amount - a.amount;
+    });
+    return filtered;
+  }, [result, searchTerm, sortBy]);
+
   const previewRows = useMemo(
-    () => (result?.transactions?.length ? toExportRows(result.transactions, exportOptions) : []),
-    [result, exportOptions]
+    () => (preparedTransactions.length ? toExportRows(preparedTransactions, exportOptions) : []),
+    [preparedTransactions, exportOptions]
   );
 
   const csv = useMemo(
-    () => (result?.transactions?.length ? toCsv(result.transactions, exportOptions) : ""),
-    [result, exportOptions]
+    () => (preparedTransactions.length ? toCsv(preparedTransactions, exportOptions) : ""),
+    [preparedTransactions, exportOptions]
   );
   const showDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
   const theme = THEMES[themeName];
   const isTerminal = themeName === "terminal";
   const hasTransactions = Boolean(result?.transactions?.length);
-  const canConvert = Boolean(file) && !busy;
+  const canConvert = files.length > 0 && !busy;
   const canExport = hasTransactions;
+  const showSourceColumn = batchResults.filter((b) => b.status === "success").length > 1;
   const analyticsContext = useMemo(
     () => ({
       clientId: getOrCreateClientId(),
@@ -354,7 +414,7 @@ export default function App() {
     trackEvent(name, analyticsContext.clientId, analyticsContext.sessionId, meta);
   }
 
-  const currentStep: "select" | "convert" | "export" = !file
+  const currentStep: "select" | "convert" | "export" = files.length === 0
     ? "select"
     : hasTransactions
       ? "export"
@@ -369,16 +429,19 @@ export default function App() {
     emitEvent("page_view");
   }, []);
 
-  function pickFile(nextFile: File | null) {
-    if (!nextFile) return;
-    const isPdf = nextFile.type === "application/pdf" || nextFile.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) {
-      setError("Please select a PDF file.");
+  function pickFiles(nextFiles: File[] | null) {
+    if (!nextFiles?.length) return;
+    const valid = nextFiles.filter(
+      (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
+    );
+    if (!valid.length) {
+      setError("Please select PDF files.");
       return;
     }
     setError(null);
     setResult(null);
-    setFile(nextFile);
+    setBatchResults([]);
+    setFiles(valid);
   }
 
   function actionButtonStyle(disabled: boolean, size: "default" | "large" = "default") {
@@ -403,20 +466,67 @@ export default function App() {
   }
 
   async function onConvert() {
-    if (!file) return;
-    emitEvent("convert_clicked", { file_name_ext: file.name.split(".").pop()?.toLowerCase() ?? "unknown" });
+    if (!files.length) return;
+    emitEvent("convert_clicked", { files: files.length });
     setError(null);
     setResult(null);
+    setBatchResults([]);
     setBusy(true);
     try {
-      const { uploadUrl, key } = await getUploadUrl(file);
-      await uploadToR2(uploadUrl, key, file);
-      const parsed = await parseFromKey(key);
-      setResult(parsed);
+      const allTransactions: Transaction[] = [];
+      const allWarnings: string[] = [];
+      const fileOutcomes: BatchItemResult[] = [];
+      const confidences: number[] = [];
+
+      for (const file of files) {
+        try {
+          const { uploadUrl, key } = await getUploadUrl(file);
+          await uploadToR2(uploadUrl, key, file);
+          const parsed = await parseFromKey(key);
+          allTransactions.push(
+            ...parsed.transactions.map((t) => ({
+              ...t,
+              sourceFile: file.name,
+            }))
+          );
+          if (parsed.warnings?.length) {
+            allWarnings.push(...parsed.warnings.map((w) => `${file.name}: ${w}`));
+          }
+          if (typeof parsed.confidence === "number") confidences.push(parsed.confidence);
+          fileOutcomes.push({
+            fileName: file.name,
+            status: "success",
+            count: parsed.transactions.length,
+            confidence: parsed.confidence,
+          });
+        } catch (e: any) {
+          fileOutcomes.push({
+            fileName: file.name,
+            status: "error",
+            count: 0,
+            error: e?.message ?? "Conversion failed",
+          });
+          allWarnings.push(`${file.name}: ${e?.message ?? "Conversion failed"}`);
+        }
+      }
+
+      setBatchResults(fileOutcomes);
+      const successful = fileOutcomes.filter((o) => o.status === "success").length;
+      if (!successful) throw new Error("No files converted successfully.");
+
+      setResult({
+        ok: true,
+        transactions: allTransactions,
+        warnings: allWarnings,
+        confidence: confidences.length
+          ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+          : 0,
+      });
       emitEvent("convert_success", {
-        transactions: parsed.transactions.length,
-        confidence: parsed.confidence ?? null,
-        warnings: parsed.warnings?.length ?? 0,
+        files: files.length,
+        successfulFiles: successful,
+        transactions: allTransactions.length,
+        warnings: allWarnings.length,
       });
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -428,24 +538,24 @@ export default function App() {
 
   function downloadCsv() {
     if (!csv) return;
-    emitEvent("download_csv", { rows: result?.transactions?.length ?? 0 });
+    emitEvent("download_csv", { rows: preparedTransactions.length, target: exportTarget });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "transactions.csv";
+    a.download = `transactions-${exportTarget}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
   async function downloadXlsx() {
-    if (!result?.transactions?.length) return;
-    emitEvent("download_xlsx", { rows: result.transactions.length });
-    const blob = await toXlsx(result.transactions, exportOptions);
+    if (!preparedTransactions.length) return;
+    emitEvent("download_xlsx", { rows: preparedTransactions.length, target: exportTarget });
+    const blob = await toXlsx(preparedTransactions, exportOptions);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "transactions.xlsx";
+    a.download = `transactions-${exportTarget}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -468,10 +578,10 @@ export default function App() {
             href="https://github.com/travist85/statement2csv/issues"
             target="_blank"
             rel="noreferrer"
-            onClick={() => emitEvent("report_issue_clicked")}
+            onClick={() => emitEvent("contact_clicked")}
             style={{ color: theme.accent, fontSize: 14 }}
           >
-            Report an issue
+            Contact
           </a>
         </div>
       </div>
@@ -483,7 +593,8 @@ export default function App() {
               ref={fileInputRef}
               type="file"
               accept="application/pdf"
-              onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+              multiple
+              onChange={(e) => pickFiles(Array.from(e.target.files ?? []))}
               style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }}
               aria-hidden="true"
               tabIndex={-1}
@@ -521,9 +632,9 @@ export default function App() {
               }}
               onDragLeave={() => setIsDraggingFile(false)}
               onDrop={(e) => {
-                e.preventDefault();
+                  e.preventDefault();
                 setIsDraggingFile(false);
-                pickFile(e.dataTransfer.files?.[0] ?? null);
+                pickFiles(Array.from(e.dataTransfer.files ?? []));
               }}
               style={{
                 position: "relative",
@@ -536,7 +647,7 @@ export default function App() {
                 borderRadius: theme.sectionRadius,
                 border: `1px dashed ${isDraggingFile ? theme.accent : theme.controlBorder}`,
                 background: isDraggingFile ? theme.controlActiveBg : theme.controlBg,
-                color: file ? theme.pageFg : theme.muted,
+                color: files.length ? theme.pageFg : theme.muted,
                 fontFamily: isTerminal ? theme.tableFont : theme.fontBody,
                 fontSize: 14,
                 cursor: "pointer",
@@ -547,14 +658,14 @@ export default function App() {
                 alignItems: "center",
                 textAlign: "center",
               }}
-              title={file ? file.name : "Drop PDF here or click to select"}
+              title={files.length ? (files.length === 1 ? files[0].name : `${files.length} files selected`) : "Drop PDF here or click to select"}
             >
-              <div style={{ fontSize: 15, lineHeight: 1.35, fontWeight: 500, color: file ? theme.pageFg : theme.muted }}>
-                {file ? "PDF selected:" : "Drop bank statement PDF here or click to select"}
+              <div style={{ fontSize: 15, lineHeight: 1.35, fontWeight: 500, color: files.length ? theme.pageFg : theme.muted }}>
+                {files.length ? "PDF file(s) selected:" : "Drop bank statement PDF files here or click to select"}
               </div>
-              {file ? (
+              {files.length ? (
                 <div style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", fontWeight: 700 }}>
-                  {file.name}
+                  {files.length === 1 ? files[0].name : `${files.length} files selected`}
                 </div>
               ) : null}
               <button
@@ -639,6 +750,29 @@ export default function App() {
                   Flip +/-
                 </button>
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <label style={{ fontSize: 13 }}>Export target:</label>
+                {([
+                  { id: "generic", label: "Generic" },
+                  { id: "xero", label: "Xero" },
+                  { id: "quickbooks", label: "QuickBooks" },
+                  { id: "myob", label: "MYOB" },
+                ] as { id: ExportTarget; label: string }[]).map((target) => (
+                  <button
+                    key={target.id}
+                    onClick={() => setExportTarget(target.id)}
+                    style={{
+                      padding: "6px 10px",
+                      border: `1px solid ${theme.controlBorder}`,
+                      background: exportTarget === target.id ? theme.controlActiveBg : theme.controlBg,
+                      color: theme.pageFg,
+                      borderRadius: theme.sectionRadius,
+                    }}
+                  >
+                    {target.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button disabled={!canExport} onClick={downloadCsv} style={actionButtonStyle(!canExport, "large")}>
@@ -650,6 +784,19 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {batchResults.length > 0 && (
+          <div style={{ marginTop: 12, border: `1px solid ${theme.panelBorder}`, padding: 10, background: theme.controlBg }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Batch results</div>
+            <div style={{ display: "grid", gap: 4 }}>
+              {batchResults.map((item, idx) => (
+                <div key={`${item.fileName}-${idx}`} style={{ fontSize: 13, color: item.status === "error" ? "#b00020" : theme.pageFg }}>
+                  {item.fileName}: {item.status === "success" ? `${item.count} transactions` : `failed (${item.error ?? "unknown error"})`}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div style={{ marginTop: 12, color: "#b00020" }}>
@@ -672,6 +819,35 @@ export default function App() {
                 {typeof result.confidence === "number" && <div><strong>Confidence:</strong> {(result.confidence * 100).toFixed(0)}%</div>}
                 <div><strong>Warnings:</strong> {result.warnings?.length ?? 0}</div>
               </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search transactions"
+                  style={{
+                    padding: "6px 8px",
+                    border: `1px solid ${theme.controlBorder}`,
+                    background: theme.controlBg,
+                    color: theme.pageFg,
+                    minWidth: 180,
+                  }}
+                />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as "date_desc" | "date_asc" | "amount_desc" | "amount_asc")}
+                  style={{
+                    padding: "6px 8px",
+                    border: `1px solid ${theme.controlBorder}`,
+                    background: theme.controlBg,
+                    color: theme.pageFg,
+                  }}
+                >
+                  <option value="date_desc">Date: newest</option>
+                  <option value="date_asc">Date: oldest</option>
+                  <option value="amount_desc">Amount: high to low</option>
+                  <option value="amount_asc">Amount: low to high</option>
+                </select>
+              </div>
             </div>
 
             {result.warnings?.length ? (
@@ -684,6 +860,7 @@ export default function App() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: theme.tableFont, tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ width: 110 }} />
+                  {showSourceColumn ? <col style={{ width: 150 }} /> : null}
                   <col />
                   {exportFormat === "split" ? (
                     <>
@@ -699,6 +876,9 @@ export default function App() {
                 <thead>
                   <tr style={{ background: theme.tableHeaderBg }}>
                     <th style={{ textAlign: "left", borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px" }}>Date</th>
+                    {showSourceColumn ? (
+                      <th style={{ textAlign: "left", borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px" }}>Source</th>
+                    ) : null}
                     <th style={{ textAlign: "left", borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px" }}>Description</th>
                     {exportFormat === "split" ? (
                       <>
@@ -718,6 +898,11 @@ export default function App() {
                   {previewRows.slice(0, 50).map((t, idx) => (
                     <tr key={idx} style={{ background: idx % 2 ? theme.tableRowAlt : "transparent" }}>
                       <td style={{ borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px", whiteSpace: "nowrap" }}>{t.date}</td>
+                      {showSourceColumn ? (
+                        <td style={{ borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {preparedTransactions[idx]?.sourceFile ?? ""}
+                        </td>
+                      ) : null}
                       <td style={{ borderBottom: `1px solid ${theme.tableRowBorder}`, padding: "8px", whiteSpace: "normal", overflowWrap: "anywhere", wordBreak: "break-word" }}>{t.description}</td>
                       {exportFormat === "split" ? (
                         <>
