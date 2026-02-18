@@ -1,6 +1,6 @@
 # Product
 
-Last updated: 2026-02-17
+Last updated: 2026-02-18
 
 ## Product identity
 
@@ -13,14 +13,19 @@ Last updated: 2026-02-17
 Web tool to convert text-based bank statement PDFs into structured transaction exports.
 
 Current flow:
-- upload statement PDF
+- upload one or more statement PDFs
 - parse and preview transactions
-- export CSV/XLSX
+- export per-file or combined outputs
 
 Current export options:
 - single signed amount or split debit/credit columns
 - sign handling controls
-- CSV or XLSX download
+- CSV, XLSX, OFX, or QIF output
+- target schema (Generic, Xero, QuickBooks, MYOB) for CSV/XLSX
+- per-file download from processed list
+- `Download All` as either:
+  - ZIP (separate files)
+  - one combined output file
 
 ## Category and positioning
 
@@ -51,16 +56,16 @@ Even when banks offer exports or open banking, users still hit:
 ## Current MVP scope (shipped)
 
 - text-based PDF parsing
+- batch conversion (multi-PDF upload)
 - transaction preview in UI
-- CSV export
+- CSV/XLSX/OFX/QIF export
 - privacy messaging + delete-after-conversion behavior
-- issue reporting path for parser feedback
+- issue/contact path for parser feedback
+- date sorting (newest/oldest)
 
 ## Not in MVP (deferred)
 
 - OCR fallback for scanned PDFs
-- XLSX/OFX/QIF exports
-- batch conversion
 - user accounts/history
 - categorization/integrations
 

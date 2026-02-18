@@ -1,13 +1,13 @@
 # statement2csv
 
-Last updated: 2026-02-17
+Last updated: 2026-02-18
 
 ## Goal
 
 Convert bank statement PDFs into structured transactions for spreadsheet/accounting workflows.
 
 Current delivery target:
-- reliable PDF -> preview -> CSV flow
+- reliable PDF -> preview -> export flow
 - early user engagement and parser feedback
 
 ## Primary users
@@ -26,7 +26,16 @@ Current delivery target:
 ## Product naming
 
 - Working name: `statement2csv`
-- Planned rename: likely `BankSheet` / `BankSheets` after early traction validation
+- Public brand in UI/domain: `BankSheet` (`banksheet.co`)
+- Repo/package name remains `statement2csv` for now
+
+## Current shipped capabilities
+
+- Multi-PDF batch upload and conversion
+- Transaction preview with date sorting
+- Export formats: CSV, XLSX, OFX, QIF
+- CSV/XLSX target mapping: Generic, Xero, QuickBooks, MYOB
+- Per-file download + `Download All` (ZIP separate files or one combined output)
 
 ## Related docs
 
